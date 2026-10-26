@@ -4,14 +4,19 @@ A minimal, fast, ad-free home experience for your TV — whatever the brand.
 One core launcher UI, one zero-dependency companion server, and a small
 adapter per platform. No frameworks, no telemetry, no accounts.
 
-| What | Samsung Tizen (2016+) | LG webOS | Roku | Android TV / Google TV / Fire TV |
-|---|---|---|---|---|
-| Discovery + pairing | ✅ field-tested (2026 model) | ✅ implemented *(needs hardware validation)* | ✅ (no pairing needed) | via ADB *(adapter welcome)* |
-| Web launcher + phone remote | ✅ | ✅ | ✅ | planned |
-| Live installed-app list | ❌ firmware removed it — curated catalog instead | ✅ | ✅ | n/a |
-| Open URL in TV browser | ✅ | ✅ | ❌ | ❌ |
-| On-TV home screen takeover | ✅ hard-won recipe (signed sideload + `home_appid`) | ✅ platform-sanctioned — packaging guide | n/a | ✅ easiest platform — see platform notes |
-| Bundled games + controller bridge | ✅ | via core launcher | — | — |
+| What | Samsung Tizen (2016+) | LG webOS | Roku (incl. **TCL / Onn** Roku TVs) | Android TV / Google TV (**TCL**, **Onn**, Sony, Hisense, Shield, Fire TV) | Sony Bravia (IP Control) |
+|---|---|---|---|---|---|
+| Discovery + pairing | ✅ field-tested (2026 model) | ✅ implemented *(needs hardware validation)* | ✅ (no pairing needed) | ✅ ADB *(implemented, needs hardware validation)* | ✅ PSK *(implemented, needs hardware validation)* |
+| Web launcher + phone remote | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Live installed-app list | ❌ firmware removed it — curated catalog instead | ✅ | ✅ | ✅ (package names) | ✅ (app URIs) |
+| Open URL in TV browser | ✅ | ✅ | ❌ | ✅ (VIEW intent) | ❌ |
+| On-TV home screen takeover | ✅ hard-won recipe (signed sideload + `home_appid`) | ✅ platform-sanctioned — packaging guide | n/a | ✅ easiest platform — see platform notes | ✅ Google TV models via the Android path |
+| Bundled games + controller bridge | ✅ | via core launcher | — | — | — |
+
+> **TCL and Onn** sets are Roku or Android/Google TVs underneath — discovery
+> detects the actual protocol automatically and notes the vendor. **Sony**
+> Bravias: Google TV models also work via the Android TV path; the native
+> IP-Control (PSK) adapter covers keys, live apps and power on the whole line.
 
 Start in `companion/`:
 

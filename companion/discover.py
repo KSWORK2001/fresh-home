@@ -164,10 +164,24 @@ def _brand(rec):
     if "webos" in hay or "lge" in hay or "lg smart" in hay:
         return "lg"
     if "roku" in hay:
-        return "roku"
+        return "roku"                     # includes TCL Roku TVs and Onn Roku TVs
+    if "sony" in hay or "bravia" in hay or "sonycom" in hay:
+        return "sony" if "android" not in hay else "androidtv"
+    if "android" in hay or "google tv" in hay or "googletv" in hay:
+        return "androidtv"                # TCL/Onn/Sony Google TV, Shield, Fire TV
     if "samsung" in hay or "tizen" in hay:
         return "samsung"
     return None
+
+
+def _vendor(rec):
+    """Marketing vendor (TCL, Onn, …) — the protocol brand is separate."""
+    hay = (f"{rec.get('friendly', '')} {rec.get('model', '')} "
+           f"{rec.get('manufacturer', '')}").lower()
+    for v in ("tcl", "onn", "hisense", "tcl·roku"):
+        if v in hay:
+            return v.upper() if v != "onn" else "Onn"
+    return ""
 
 
 def find_tv(verbose=True):
@@ -221,15 +235,16 @@ def main():
     if not tv:
         print("\nNo TV found. Make sure it's powered on and on this Wi-Fi, then retry.")
         return 1
-    print(f"\n✓ {tv['brand'].upper()} TV found")
-    for key, label in (("friendly", "Name"), ("brand", "Brand"), ("model", "Model"),
+    print(f"\n✓ TV found — {tv.get('vendor') or tv['brand'].upper()}"
+          f"{' (' + tv['brand'] + ')' if tv.get('vendor') else ''}")
+    for key, label in (("friendly", "Name"), ("brand", "Protocol"), ("model", "Model"),
                        ("ip", "IP"), ("mac", "MAC"), ("ports", "Ports")):
         if tv.get(key):
-            print(f"    {label:6} {tv[key]}")
+            print(f"    {label:9} {tv[key]}")
     import samsung
-    samsung.save_config(ip=tv["ip"], brand=tv["brand"], mac=tv.get("mac"),
-                        model=tv.get("model"), friendly=tv.get("friendly"),
-                        ports=tv.get("ports"))
+    samsung.save_config(ip=tv["ip"], brand=tv["brand"], vendor=tv.get("vendor", ""),
+                        mac=tv.get("mac"), model=tv.get("model"),
+                        friendly=tv.get("friendly"), ports=tv.get("ports"))
     print("\nSaved to companion/config.json. Next step:  python3 tv.py pair")
     return 0
 

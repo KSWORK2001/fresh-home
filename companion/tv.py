@@ -36,14 +36,14 @@ PAIRING = {"active": False, "message": ""}
 
 
 def _brand():
-    """The adapter module for the configured TV brand (samsung | lg | roku)."""
+    """The adapter module for the configured TV brand (samsung | lg | roku | sony | androidtv)."""
     import importlib
     try:
         with open(os.path.join(HERE, "config.json")) as f:
             name = json.load(f).get("brand") or "samsung"
     except Exception:
         name = "samsung"
-    if name not in ("samsung", "lg", "roku"):
+    if name not in ("samsung", "lg", "roku", "sony", "androidtv"):
         name = "samsung"
     return importlib.import_module(name)
 

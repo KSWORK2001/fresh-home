@@ -12,7 +12,10 @@ third-party launchers are a first-class concept there:
   the companion below. (If you want Fresh Home's UI *as* the launcher, wrap
   `core/launcher/` in a WebView shell APK with a HOME intent and a JS bridge
   implementing `device.js` — PRs welcome.)
-- **Companion (remote control):** enable Developer Options → Network
+- **Companion (now built):** `companion/androidtv.py` drives any Android TV
+  (TCL and Onn Google TV models, Sony Bravia Google TV, Hisense, Shield,
+  Fire TV) over ADB: keys, app list + launch, VIEW-intent URL opening.
+  Enable Developer Options → Network
   debugging (ADB over TCP) on the TV, then `adb connect <tv-ip>:5555`.
   Everything the phone remote does maps to ADB commands:
   keys via `adb shell input keyevent` (KEYCODE_DPAD_UP…), apps via
