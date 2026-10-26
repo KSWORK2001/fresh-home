@@ -10,7 +10,7 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 
-IP=${1:-$(python3 -c "import json;print(json.load(open('../config.json'))['ip'])" 2>/dev/null)}
+IP=${1:-$(python3 -c "import json;print(json.load(open('../../companion/config.json'))['ip'])" 2>/dev/null)}
 SDB=${SDB:-sdb}
 MAC_IP=$(ipconfig getifaddr en0)
 

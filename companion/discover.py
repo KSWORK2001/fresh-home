@@ -24,9 +24,11 @@ CONFIG_PATH = os.path.join(HERE, "config.json")
 
 SSDP = ("239.255.255.250", 1900)
 TARGETS = [
-    "urn:dial-multiscreen-org:service:dial:1",
+    "urn:dial-multiscreen-org:service:dial:1",     # Samsung + others (DIAL)
     "urn:samsung.com:device:MainTVAgentServer:1",
     "urn:samsung.com:service:MainTVAgentServer:1",
+    "urn:lge-com:service:webos-second-screen:1",   # LG webOS
+    "roku:ecp",                                    # Roku
     "upnp:rootdevice",
     "ssdp:all",
 ]
@@ -157,13 +159,19 @@ def get_mac(ip):
 
 # -------------------------------------------------------------- top level ---
 
-def _is_samsung(rec):
+def _brand(rec):
     hay = " ".join(str(v) for v in rec.values()).lower()
-    return "samsung" in hay or "tizen" in hay
+    if "webos" in hay or "lge" in hay or "lg smart" in hay:
+        return "lg"
+    if "roku" in hay:
+        return "roku"
+    if "samsung" in hay or "tizen" in hay:
+        return "samsung"
+    return None
 
 
 def find_tv(verbose=True):
-    """Return the best Samsung-TV record found, or None."""
+    """Return the best TV record found (with a 'brand' field), or None."""
     if verbose:
         print("Scanning the network via SSDP (up to ~8s)…")
     recs = []
@@ -180,22 +188,30 @@ def find_tv(verbose=True):
         if verbose:
             print(f"  · {rec['ip']:15} {rec['friendly'] or rec['server'] or 'device':40} {rec['model']}")
 
-    tvs = [r for r in recs if _is_samsung(r)]
+    tvs = [r for r in recs if _brand(r)]
     if not tvs:
         if verbose:
-            print("Nothing Samsung via SSDP — sweeping the subnet for control ports…")
+            print("No TV via SSDP — sweeping the subnet for Samsung control ports…")
         subnet = _local_subnet()
         if subnet:
             for ip, ports in sweep_scan(subnet).items():
-                tvs.append({"ip": ip, "ports": ports, "friendly": "", "model": ""})
+                tvs.append({"ip": ip, "ports": ports, "friendly": "", "model": "",
+                            "brand": "samsung"})
 
     if not tvs:
         return None
 
-    # Prefer the M70HB if multiple Samsungs are around
-    tvs.sort(key=lambda r: 0 if "m70" in f"{r.get('model', '')}{r.get('friendly', '')}".lower() else 1)
+    for r in tvs:
+        r.setdefault("brand", _brand(r) or "samsung")
+
+    # Prefer the brand already configured; then Samsung; then anything else
+    import samsung
+    wanted = samsung.load_config().get("brand")
+    tvs.sort(key=lambda r: 0 if (wanted and r["brand"] == wanted) else
+                        1 if r["brand"] == "samsung" else 2)
     tv = tvs[0]
-    tv["ports"] = tv.get("ports") or [p for p in SAMSUNG_PORTS if probe(tv["ip"], p, 1.0)]
+    if tv["brand"] == "samsung":
+        tv["ports"] = tv.get("ports") or [p for p in SAMSUNG_PORTS if probe(tv["ip"], p, 1.0)]
     tv["mac"] = get_mac(tv["ip"])
     return tv
 
@@ -203,17 +219,18 @@ def find_tv(verbose=True):
 def main():
     tv = find_tv()
     if not tv:
-        print("\nNo Samsung TV found. Make sure it's powered on and on this Wi-Fi, then retry.")
+        print("\nNo TV found. Make sure it's powered on and on this Wi-Fi, then retry.")
         return 1
-    print("\n✓ Samsung TV found")
-    for key, label in (("friendly", "Name"), ("model", "Model"), ("ip", "IP"),
-                       ("mac", "MAC"), ("ports", "Ports")):
+    print(f"\n✓ {tv['brand'].upper()} TV found")
+    for key, label in (("friendly", "Name"), ("brand", "Brand"), ("model", "Model"),
+                       ("ip", "IP"), ("mac", "MAC"), ("ports", "Ports")):
         if tv.get(key):
             print(f"    {label:6} {tv[key]}")
     import samsung
-    samsung.save_config(ip=tv["ip"], mac=tv.get("mac"), model=tv.get("model"),
-                        friendly=tv.get("friendly"), ports=tv.get("ports"))
-    print("\nSaved to config.json. Next step:  python3 tv.py pair")
+    samsung.save_config(ip=tv["ip"], brand=tv["brand"], mac=tv.get("mac"),
+                        model=tv.get("model"), friendly=tv.get("friendly"),
+                        ports=tv.get("ports"))
+    print("\nSaved to companion/config.json. Next step:  python3 tv.py pair")
     return 0
 
 

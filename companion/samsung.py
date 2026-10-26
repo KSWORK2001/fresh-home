@@ -55,16 +55,31 @@ def save_config(**fields):
 def get_tv():
     cfg = load_config()
     if not cfg.get("ip"):
-        raise SystemExit("TV not configured yet — run:  python3 discover.py")
+        raise SystemExit("TV not configured yet — run:  python3 tv.py discover")
     tv = SamsungTV(cfg["ip"], cfg.get("token"), cfg.get("tv_name") or "Mac Launcher",
                    cfg.get("port") or 8002, cfg.get("encoding"))
     return tv, cfg
 
 
 def catalog_apps():
-    """The editable app catalog (apps.json next to this file)."""
-    with open(os.path.join(HERE, "apps.json")) as f:
+    """The editable app catalog (../catalogs/apps.json)."""
+    with open(os.path.join(HERE, "..", "catalogs", "apps.json")) as f:
         return json.load(f)
+
+
+def is_paired(cfg):
+    return bool(cfg.get("token")) or cfg.get("port") == 8001
+
+
+def pair():
+    """Pair with the configured TV (press Allow once on the TV)."""
+    cfg = load_config()
+    if not cfg.get("ip"):
+        raise SystemExit("TV not configured — run:  python3 tv.py discover")
+    tv = SamsungTV(cfg["ip"], None, "Mac Launcher", cfg.get("port") or 8002)
+    tv.pair()
+    save_config(token=tv.token, port=tv.port, encoding=tv.encoding)
+    return tv
 
 
 # ------------------------------------------------------------- websocket ----

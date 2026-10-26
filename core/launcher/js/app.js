@@ -529,19 +529,10 @@
   }
 
   function openUrl(url) {
-    if (typeof tizen === 'undefined' || !tizen.application) {
-      toast('Preview — would open ' + url.replace('https://', ''));
-      return;
-    }
-    try {
-      var ac = new tizen.ApplicationControl(
-        'http://tizen.org/appcontrol/operation/view', url);
-      tizen.application.launchAppControl(ac, 'org.tizen.browser',
-        null, function () { toast('Could not open the browser'); },
-        function () { toast('Browser failed'); });
-    } catch (e) {
-      toast('Browser failed');
-    }
+    var sent = FreshDevice.openUrl(url, function () {
+      toast('Could not open the browser');
+    });
+    if (!sent) toast('Preview — would open ' + url.replace('https://', ''));
   }
 
   // ---- bridge-host keyboard ---------------------------------------------------
@@ -666,17 +657,11 @@
   }
 
   function launchApp(app) {
-    if (typeof tizen === 'undefined' || !tizen.application) {
-      toast('Preview — would open ' + app.name);
-      return;
-    }
     var ids = [app.appId].concat(app.alt || []);
-    (function attempt(i) {
-      if (i >= ids.length) { toast('Could not open ' + app.name); return; }
-      try {
-        tizen.application.launch(ids[i], null, function () { attempt(i + 1); });
-      } catch (e) { attempt(i + 1); }
-    })(0);
+    var sent = FreshDevice.launch(ids, app.name, function () {
+      toast('Could not open ' + app.name);
+    });
+    if (!sent) toast('Preview — would open ' + app.name);
   }
 
   // ---- toast -------------------------------------------------------------------

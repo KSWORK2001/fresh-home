@@ -4,11 +4,11 @@ config.json
 # your TV's original home-screen settings
 home-backup.txt
 # signing keys (author.p12, Samsung certs, password.txt)
-on-tv/tools/certs/
+platforms/*/tools/certs/
 
 # Build artifacts
 *.wgt
-on-tv/launcher/js/catalog.js
+core/launcher/js/catalog.js
 
 # OS / tooling noise
 __pycache__/

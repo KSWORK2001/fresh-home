@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""Fast local launcher + remote for a Samsung Tizen TV. Zero dependencies.
+"""Fresh Home companion — local launcher + remote for your TV. Zero deps.
 
-  python3 tv.py discover        find the TV on this network
-  python3 tv.py pair            one-time pairing (press Allow on the TV)
-  python3 tv.py apps            list the app catalog (apps.json)
+Brand-agnostic: the adapter (samsung | lg | roku) is chosen by the "brand"
+field in config.json, set automatically by discovery.
+
+  python3 tv.py discover        find TVs on this network (any brand)
+  python3 tv.py pair            one-time pairing (Samsung/LG; Roku needs none)
+  python3 tv.py apps            list apps (live list on LG/Roku, catalog on Samsung)
   python3 tv.py launch <query>  launch an app (fuzzy): tv.py launch netflix
   python3 tv.py key <KEY>       send a key: KEY_VOLUP, KEY_MUTE, KEY_HOME…
-  python3 tv.py power           power toggle
+  python3 tv.py power           power off
+  python3 tv.py browse <url>    open a URL in the TV's browser
   python3 tv.py wake            wake the TV (Wake-on-LAN)
-  python3 tv.py serve           web launcher UI (default port 8590)
+  python3 tv.py serve           web launcher + phone remote + bridge (port 8590)
 """
 
 import argparse
@@ -25,11 +29,24 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import discover
-import samsung
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOCK = threading.Lock()
 PAIRING = {"active": False, "message": ""}
+
+
+def _brand():
+    """The adapter module for the configured TV brand (samsung | lg | roku)."""
+    import importlib
+    try:
+        with open(os.path.join(HERE, "config.json")) as f:
+            name = json.load(f).get("brand") or "samsung"
+    except Exception:
+        name = "samsung"
+    if name not in ("samsung", "lg", "roku"):
+        name = "samsung"
+    return importlib.import_module(name)
+
 
 # --- controller bridge relay -------------------------------------------------
 # /bridge      — page on the Mac/phone: reads a gamepad, streams over WS
@@ -143,26 +160,26 @@ def cmd_discover(args):
 
 
 def cmd_pair(args):
-    cfg = samsung.load_config()
+    B = _brand()
+    cfg = B.load_config()
     if not cfg.get("ip"):
-        print("TV not configured — run:  python3 discover.py")
+        print("TV not configured — run:  python3 tv.py discover")
         return 1
-    print(f"Pairing with {cfg.get('friendly') or 'the TV'} at {cfg['ip']}…")
-    tv = samsung.SamsungTV(cfg["ip"], None, "Mac Launcher", cfg.get("port") or 8002)
-    tv.pair()
-    samsung.save_config(token=tv.token, port=tv.port, encoding=tv.encoding)
-    print("✓ Paired — token saved. You never have to do this again.")
+    print(f"Pairing with {cfg.get('friendly') or 'the TV'} "
+          f"({cfg.get('brand', 'samsung')}) at {cfg['ip']}…")
+    B.pair()
     return 0
 
 
 def cmd_apps(args):
-    for a in samsung.catalog_apps():
-        print(f"{a['appId']:>20}  {a['name']}")
+    B = _brand()
+    for a in B.catalog_apps():
+        print(f"{a['appId']:>28}  {a['name']}")
     return 0
 
 
 def _pick(query):
-    apps = samsung.catalog_apps()
+    apps = _brand().catalog_apps()
     q = query.lower().strip()
     for a in apps:
         ids = [a["appId"]] + a.get("alt", [])
@@ -175,7 +192,7 @@ def _pick(query):
 
 
 def cmd_launch(args):
-    tv, _ = samsung.get_tv()
+    tv, _ = _brand().get_tv()
     app = _pick(args.app)
     if not app:
         print(f'No app matching "{args.app}". See:  python3 tv.py apps')
@@ -186,19 +203,19 @@ def cmd_launch(args):
 
 
 def cmd_key(args):
-    tv, _ = samsung.get_tv()
+    tv, _ = _brand().get_tv()
     tv.key(args.key.upper())
     return 0
 
 
 def cmd_power(args):
-    tv, _ = samsung.get_tv()
+    tv, _ = _brand().get_tv()
     tv.power()
     return 0
 
 
 def cmd_browse(args):
-    tv, _ = samsung.get_tv()
+    tv, _ = _brand().get_tv()
     url = args.url if "://" in args.url else "https://" + args.url
     print(f"Opening {url} on the TV…")
     tv.open_browser(url)
@@ -206,11 +223,12 @@ def cmd_browse(args):
 
 
 def cmd_wake(args):
-    cfg = samsung.load_config()
+    B = _brand()
+    cfg = B.load_config()
     if not cfg.get("mac"):
         print("No MAC in config.json (run discover.py while the TV is awake).")
         return 1
-    samsung.wol(cfg["mac"])
+    B.wol(cfg["mac"])
     print("Wake-on-LAN packets sent.")
     return 0
 
@@ -218,17 +236,16 @@ def cmd_wake(args):
 # ---------------------------------------------------------------- server ----
 
 def _tv_from_config():
-    cfg = samsung.load_config()
-    if not cfg.get("ip"):
-        return None, cfg
-    tv = samsung.SamsungTV(cfg["ip"], cfg.get("token"), cfg.get("tv_name") or "Mac Launcher",
-                           cfg.get("port") or 8002, cfg.get("encoding"))
-    return tv, cfg
+    B = _brand()
+    try:
+        return B.get_tv()
+    except SystemExit:
+        return None, B.load_config()
 
 
 def make_handler():
     class Handler(BaseHTTPRequestHandler):
-        server_version = "TVLauncher/1.0"
+        server_version = "TVLauncher/2.0"
 
         def log_message(self, *a):
             pass
@@ -255,37 +272,21 @@ def make_handler():
                     _handle_feed_ws(self)
                 return
             if self.path == "/remote":
-                with open(os.path.join(HERE, "remote.html"), "rb") as f:
-                    body = f.read()
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+                self._serve_file("remote.html")
                 return
             if self.path == "/bridge":
-                with open(os.path.join(HERE, "bridge.html"), "rb") as f:
-                    body = f.read()
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+                self._serve_file("bridge.html")
                 return
             try:
                 if self.path in ("/", "/index.html"):
-                    with open(os.path.join(HERE, "index.html"), "rb") as f:
-                        body = f.read()
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/html; charset=utf-8")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
+                    self._serve_file("index.html")
                 elif self.path == "/api/status":
+                    B = _brand()
                     tv, cfg = _tv_from_config()
                     self._json({
                         "found": bool(cfg.get("ip")),
-                        "paired": bool(cfg.get("token")) or cfg.get("port") == 8001,
+                        "paired": B.is_paired(cfg),
+                        "brand": cfg.get("brand", "samsung"),
                         "ip": cfg.get("ip"), "model": cfg.get("model"),
                         "friendly": cfg.get("friendly"),
                         "pairing": PAIRING["active"],
@@ -296,11 +297,20 @@ def make_handler():
                     if not tv:
                         self._json({"error": "TV not discovered yet"}, 409)
                     else:
-                        self._json({"apps": samsung.catalog_apps()})
+                        self._json({"apps": _brand().catalog_apps()})
                 else:
                     self._json({"error": "not found"}, 404)
             except Exception as e:
                 self._json({"error": f"TV unreachable: {e}"}, 503)
+
+        def _serve_file(self, name):
+            with open(os.path.join(HERE, name), "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         def do_POST(self):
             try:
@@ -322,8 +332,9 @@ def make_handler():
                         tv.power()
                     self._json({"ok": True})
                 elif self.path == "/api/wake":
-                    cfg = samsung.load_config()
-                    ok = samsung.wol(cfg.get("mac", ""))
+                    B = _brand()
+                    cfg = B.load_config()
+                    ok = B.wol(cfg.get("mac", ""))
                     self._json({"ok": ok})
                 elif self.path == "/api/browse":
                     body = self._body()
@@ -337,24 +348,21 @@ def make_handler():
                         return
 
                     def run():
+                        B = _brand()
                         PAIRING.update(active=True, message="Looking for the TV…")
                         try:
-                            cfg = samsung.load_config()
+                            cfg = B.load_config()
                             if not cfg.get("ip"):
                                 rec = discover.find_tv(verbose=False)
                                 if not rec:
                                     PAIRING.update(active=False,
                                                    message="No TV found — turn it on and re-scan")
                                     return
-                                cfg = samsung.save_config(ip=rec["ip"], mac=rec.get("mac"),
-                                                          model=rec.get("model"),
-                                                          friendly=rec.get("friendly"))
+                                cfg = B.save_config(ip=rec["ip"], mac=rec.get("mac"),
+                                                    model=rec.get("model"),
+                                                    friendly=rec.get("friendly"))
                             PAIRING.update(message="Waiting for Allow on the TV…")
-                            tv = samsung.SamsungTV(cfg["ip"], None, "Mac Launcher",
-                                                   cfg.get("port") or 8002)
-                            tv.pair(log=lambda m: PAIRING.update(message=m.strip(" →…")))
-                            samsung.save_config(token=tv.token, port=tv.port,
-                                                encoding=tv.encoding)
+                            B.pair()
                             PAIRING.update(active=False, message="")
                         except Exception as e:
                             PAIRING.update(active=False, message=str(e))
@@ -384,13 +392,14 @@ def _lan_ip():
 
 
 def cmd_serve(args):
-    cfg = samsung.load_config()
+    B = _brand()
+    cfg = B.load_config()
     if not cfg.get("ip"):
         print("No TV configured — discovering…")
         if not discover.find_tv(verbose=True):
-            print("Couldn't find the TV. Turn it on / check Wi-Fi, then: python3 tv.py serve")
+            print("Couldn't find a TV. Turn it on / check Wi-Fi, then: python3 tv.py serve")
             return 1
-        cfg = samsung.load_config()
+        cfg = B.load_config()
 
     port, httpd = args.port, None
     for _ in range(10):
@@ -403,12 +412,12 @@ def cmd_serve(args):
         print("Could not bind a port.")
         return 1
 
-    print(f"\n  TV launcher →  http://localhost:{port}")
+    print(f"\n  Fresh Home →   http://localhost:{port}")
     lan = _lan_ip()
     if lan:
-        print(f"  from phone →   http://{lan}:{port}")
-    paired = bool(cfg.get("token")) or cfg.get("port") == 8001
-    print(f"  TV: {cfg.get('friendly') or cfg['ip']} ({cfg['ip']})"
+        print(f"  from phone →   http://{lan}:{port}  (/remote for the phone remote)")
+    paired = B.is_paired(cfg)
+    print(f"  TV: {cfg.get('friendly') or cfg['ip']} ({cfg.get('brand', 'samsung')}, {cfg['ip']})"
           f"  —  {'paired ✓' if paired else 'needs pairing (click Pair in the web UI)'}\n")
 
     if not args.no_browser:
@@ -449,7 +458,7 @@ def main():
         rc = args.fn(args) or 0
     except KeyboardInterrupt:
         rc = 130
-    except (samsung.TVError, OSError) as e:
+    except (_brand().TVError, OSError) as e:
         print(f"error: {e}")
         rc = 1
     sys.exit(rc)

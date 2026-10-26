@@ -1,166 +1,65 @@
-# Fresh Home — a custom launcher for Samsung Tizen TVs
+# Fresh Home — take back your smart TV
 
-Two tools for taking back a Samsung Smart TV:
+A minimal, fast, ad-free home experience for your TV — whatever the brand.
+One core launcher UI, one zero-dependency companion server, and a small
+adapter per platform. No frameworks, no telemetry, no accounts.
 
-1. **Fresh Home (on-TV)** — a minimal, fast home screen that the remote's
-   **Home button opens** and the TV **boots into**. Typographic UI, one
-   app grid that quietly reorders by what you actually use, a built-in
-   app catalog browser ("Get Apps"), and zero ads. Pure HTML/CSS/JS in a
-   Tizen `.wgt` — no frameworks.
-2. **Fresh Home (LAN)** — a zero-install web launcher served from your
-   Mac: discovers the TV, pairs once, then launches any app from your
-   Mac or phone in one click. Works on any 2016+ Samsung TV today, no
-   sideloading involved.
+| What | Samsung Tizen (2016+) | LG webOS | Roku | Android TV / Google TV / Fire TV |
+|---|---|---|---|---|
+| Discovery + pairing | ✅ field-tested (2026 model) | ✅ implemented *(needs hardware validation)* | ✅ (no pairing needed) | via ADB *(adapter welcome)* |
+| Web launcher + phone remote | ✅ | ✅ | ✅ | planned |
+| Live installed-app list | ❌ firmware removed it — curated catalog instead | ✅ | ✅ | n/a |
+| Open URL in TV browser | ✅ | ✅ | ❌ | ❌ |
+| On-TV home screen takeover | ✅ hard-won recipe (signed sideload + `home_appid`) | ✅ platform-sanctioned — packaging guide | n/a | ✅ easiest platform — see platform notes |
+| Bundled games + controller bridge | ✅ | via core launcher | — | — |
 
-Built and field-tested against a 2026 Samsung UN85M70HB (Tizen, One UI era)
-— including everything that firmware does to stop you, documented in
-[Field notes](#field-notes-2026-tizen-firmware) below.
+Start in `companion/`:
 
----
+    cd companion
+    python3 tv.py discover        # finds TVs of any supported brand
+    python3 tv.py pair            # once (Roku skips this)
+    python3 tv.py serve           # web launcher + phone remote + gamepad bridge
+                                  #   → http://localhost:8590  (/remote on a phone)
 
-## Status
+CLI: `launch netflix` · `key KEY_MUTE` · `power` · `browse <url>` · `wake`.
 
-| Component | State |
-|---|---|
-| LAN launcher | ✅ working end-to-end (discovery, pairing, app launching, keys, wake) |
-| On-TV launcher app | ✅ built + QA'd at 1080p/4K, signing pipeline ready |
-| On-TV install | ⚠️ requires a per-device Samsung certificate (2024+ TVs reject the free SDK certs) — full recipe below |
-| Home-button takeover | documented; uses a wrapper app + two `vconf` keys, fully reversible |
+- **Web launcher** (`/`) — one-click app tiles for Mac/phone.
+- **Phone remote** (`/remote`) — swipe/tap touchpad, volume, power, app
+  chips, cloud-gaming chips. Add to home screen for an app-like remote.
+- **Controller bridge** (`/bridge`) — stream any gamepad from your
+  computer/phone to the bundled web games on the TV.
 
----
+## The on-TV launcher (Fresh Home proper)
 
-## Fresh Home (LAN) — quick start
+A typographic, monochrome home screen — clock, one app grid that reorders
+by use, a Get Apps catalog browser, bundled offline games, cloud-gaming
+shortcuts. The Home button opens it; power-on boots into it. The same UI
+(`core/launcher/`) packages per platform:
 
-    python3 discover.py     # find the TV over SSDP (writes config.json)
-    python3 tv.py pair      # press Allow once on the TV; token is cached
-    python3 tv.py serve     # → http://localhost:8590 (also works from a phone)
-
-CLI shortcuts:
-
-    python3 tv.py launch netflix     # fuzzy-matches the app catalog
-    python3 tv.py key KEY_MUTE
-    python3 tv.py power
-    python3 tv.py wake               # Wake-on-LAN (needs TV network standby on)
-
-Zero dependencies — Python stdlib only, including a hand-rolled WebSocket
-client for the TV's control protocol on port 8002/8001.
-
-## Fresh Home (on-TV) — install
-
-**What gets installed:**
-
-- `freshhome.launcher` — the launcher. Declares the Tizen `main`
-  app-control operation so it can answer Home/power-on launches.
-- `fhkey0001.key` — a 0.2 s wrapper app. **Why:** the TV relaunches its
-  home app through a special no-raise path (`__NO_RAISE_WINDOW`) that
-  leaves a directly-registered launcher stuck behind the loading screen.
-  So `db/appfw/home_appid` points at the wrapper, which starts the real
-  launcher normally and exits. `db/appfw/startup_appid` (power-on)
-  points at the launcher directly.
-
-**Steps:**
-
-1. **Developer Mode on the TV** — Home → Apps → gear (App Settings) →
-   press `123` on the remote → enter `12345` → Developer mode **On**,
-   Host PC IP = your computer's IP → the TV restarts. This opens
-   `sdb` on port 26101 (`sdb connect <TV_IP>:26101`).
-
-2. **A Samsung-issued certificate** (the hard gate — see field notes):
-   on 2024+ firmware the TV refuses unsigned packages *and* packages
-   signed with the free Tizen SDK developer certificate. Mint a real
-   author + DUID-bound distributor certificate with your (free) Samsung
-   account:
-
-       pip3 install cryptography certifi
-       python3 on-tv/tools/make_samsung_cert.py <TV_DUID> \
-           --out on-tv/tools/certs/samsung
-
-   Your browser opens a Samsung sign-in page; the token stays in memory.
-   The DUID is on the TV under Settings → Support → Contact Samsung.
-   (Script adapted from anandhuremanan/samsung-tizen-clock-app — the CA
-   download it needs happens automatically the first time.)
-
-3. **Build, sign, install:**
-
-       cd on-tv
-       ./build.sh                       # packages both widgets
-       cd tools && ./build-signed.sh    # signs with your Samsung certs
-       cd .. && ./install.sh            # sdb install + flip Home + backup
-
-   `sign.js` replicates Samsung's own extension signer (same SignedInfo
-   layout, constant `#prop` digests, exclusive C14N quirks) in pure Node,
-   using the extension's node-forge. No Tizen Studio, no Java.
-
-4. Press **Home**. Power-cycle once to confirm boot-into-launcher.
-
-**Rollback:** `on-tv/restore-home.sh` puts the stock Samsung Home back
-(`com.samsung.tv.csfs`) and can uninstall both widgets.
-
-## Games & controllers
-
-The launcher ships with a **Games** tile (pinned, next to Web Browser) — three
-bundled, offline, zero-tracking games (Snake, Breakout, 2048) that run inside
-the launcher. Input reaches them three ways, all merged into one API:
-
-1. **The remote itself** — d-pad + OK work in every game.
-2. **A controller paired directly to the TV** — pair a Bluetooth gamepad or
-   plug a USB one into the TV; the app declares Samsung's gamepad metadata
-   (`http://samsung.com/tv/metadata/gamepad` = `extend`) so the browser
-   Gamepad API feeds the games. This is the lowest-latency path.
-3. **The Controller Bridge** — for controllers the TV won't accept:
-   run `python3 tv.py serve` on your Mac and open
-   **http://your-mac:8590/bridge** on the Mac (or a phone). That page reads
-   any browser-visible gamepad (plus WASD/arrows as a keyboard fallback) and
-   streams it over a WebSocket to the Games screen on the TV. Set the bridge
-   host on the TV once: Games → Bridge Host (d-pad keyboard, no typing on a
-   phone needed).
-
-The bridge relay is built into `tv.py serve` (`/ws/bridge` in, `/ws/feed`
-out) — a hand-rolled WebSocket server, still zero dependencies.
-
-## Cloud gaming & web clients
-
-The Games screen also has a **Cloud & Streaming** section: Xbox Cloud
-Gaming, GeForce NOW, Amazon Luna, PS Remote Play, and Steam Link. These open
-in the **TV's stock browser** — the only context on the TV with DRM video
-and native gamepad support — so pair the controller **directly to the TV**
-for cloud gaming (the Mac bridge cannot inject input into another app).
-
-**Open URL…** lets you point the TV browser at any web game client,
-including self-hosted open-source remote-play projects (the new wave of
-browser game-streaming clients like the web-based PS Remote Play tools).
-On the LAN side, `python3 tv.py browse <url>` (or `POST /api/browse`) opens
-a URL on the TV from your Mac.
-
-## Phone remote (Android/iOS)
-
-With `python3 tv.py serve` running, open **http://your-mac:8590/remote**
-on any phone on the Wi-Fi: swipe-to-navigate touchpad, tap for OK, hard
-buttons for BACK/HOME/VOL±/MUTE/POWER/WAKE, one-tap app launch chips, and
-cloud-gaming chips that open the services on the TV. Add it to the home
-screen for an app-like full-screen remote. (Android gives haptics on every
-key press.)
+- **`platforms/samsung-tizen/`** — the full, field-tested route: unsigned
+  → SDK-signed → Samsung-account certificate saga, the pure-Node `.wgt`
+  signer, the Home-key wrapper pattern, install/rollback scripts, and the
+  [field notes](#field-notes-2026-tizen-firmware) below. This is the
+  hardest platform; everything needed to repeat it is in the box.
+- **`platforms/lg-webos/`** — SSAP companion adapter (implemented, needs
+  hardware validation) + `.ipk` packaging guide. webOS allows third-party
+  home screens natively.
+- **`platforms/android-tv/`** — ADB notes + pointers; PRs for an adapter
+  or a WebView shell APK welcome.
 
 ## Design
 
-The launcher UI is deliberately typographic: no icon assets, no gradients,
-one white focus ring. Each tile carries the app's initial in its brand
-color (lightness-normalized so every mark reads on near-black), a large
-clock anchors the composition, and motion is limited to a 180 ms focus
-transition and a 240 ms scroll. The stage is a fixed 1920×1080 canvas
-scaled to the real viewport — on Tizen, web-app UI renders at 1920×1080
-on every panel (UHD included) and the compositor upscales 2×, so the UI
-is all-vector and stays crisp.
-
-The **Get Apps** tile opens a catalog of ~100 Tizen apps (IDs from
-community-maintained lists); OK adds/removes tiles with the d-pad —
-no typing app IDs with a remote — and a row at the top jumps into the
-Samsung App Store for real downloads.
+No icon assets, no gradients, one white focus ring. Each tile carries the
+app's initial in its brand color (lightness-normalized to read on
+near-black); motion is limited to a 180 ms focus transition. The stage is a
+fixed 1920×1080 canvas scaled to the real viewport (Tizen renders web-app
+UI at 1080p on every panel; the compositor upscales — all-vector UI stays
+crisp).
 
 ## Field notes: 2026 Tizen firmware
 
-Everything learned the hard way on a UN85M70HB (Oct 2026 firmware),
-much of it undocumented elsewhere:
+Everything learned the hard way on a UN85M70HB (Oct 2026 firmware), much
+of it undocumented elsewhere:
 
 - **`sdb install` fails silently.** It pushes the file, prints progress,
   exits 0 — and the package manager drops unsigned/rejected packages
@@ -170,8 +69,7 @@ much of it undocumented elsewhere:
 - **The signature gate is strict.** Rejected: unsigned, SDK
   developer-CA-signed (author + sdk-public distributor), author-only.
   Accepted path: Samsung-account author cert + DUID-bound distributor
-  cert (see install step 2). This matches what other 2024+ TV owners
-  have reported.
+  cert (see `platforms/samsung-tizen/tools/make_samsung_cert.py`).
 - **`sdb shell` is a silent allowlist.** Most commands return nothing at
   all. `vconftool set -t string -f <key> <value>` executes (exit 0);
   anything with redirection, backticks, or most other binaries returns
@@ -186,46 +84,47 @@ much of it undocumented elsewhere:
   commands sent before the `ms.channel.ready` / `ms.channel.connect`
   event are rejected with `No Authorized` — wait for the greeting.
 - **Home routing** works exactly as on earlier Tizen: `db/appfw/home_appid`
-  (wrapper pattern, see above) + `db/appfw/startup_appid` + declaring
-  the `main` app-control operation in `config.xml` (manifest schema
-  2.4+, `reload="disable"`).
+  (wrapper pattern — the TV relaunches home via `__NO_RAISE_WINDOW`, so a
+  directly-registered launcher sticks behind the loading screen; use a
+  0.2 s wrapper app that starts the real launcher and exits) +
+  `db/appfw/startup_appid` + declaring the `main` app-control operation
+  in `config.xml` (manifest schema 2.4+, `reload="disable"`).
 - Web-app UI renders at 1920×1080 on all panels; 4K is video-only.
 
 ## Repo layout
 
-    discover.py, samsung.py, tv.py, index.html   LAN launcher (stdlib-only)
-    bridge.html                                   controller bridge page (/bridge)
-    apps.json                                     core app catalog (shared)
-    apps-extra.json                               extended catalog (Get Apps)
-    on-tv/launcher/                               the .wgt launcher source
-    on-tv/launcher/games/                         bundled web games (offline)
-    on-tv/launcher/js/input.js                    unified input (keys/gamepad/bridge)
-    on-tv/homekey/                                the Home-key wrapper .wgt
-    on-tv/tools/sign.js                           wgt signer (Samsung-compatible)
-    on-tv/tools/make_samsung_cert.py              Samsung-account certificate mint
-    on-tv/{build,install,restore-home}.sh         build / install / rollback
+    core/launcher/            the brand-agnostic launcher UI
+      js/device.js            the ONLY platform-aware file (launch/openUrl seam)
+      games/                  bundled offline games (Snake, Breakout, 2048)
+      js/input.js             unified input: remote + gamepad + bridge
+    companion/                zero-dependency server + CLI + web UIs
+      samsung.py lg.py roku.py   brand adapters (SSAP, ECP, Samsung WS)
+      tv.py                   CLI + web server + phone remote + bridge relay
+      remote.html bridge.html index.html
+    catalogs/                 shared app catalogs (core + extended)
+    platforms/
+      samsung-tizen/          .wgt packaging, signer, cert minting, field notes
+      lg-webos/  android-tv/  platform guides and adapters (growing)
 
-`config.json` (TV IP + pairing token) and everything under
-`on-tv/tools/certs/` are gitignored — they are yours alone.
+`companion/config.json` (TV IP + pairing secrets) and everything under
+`platforms/*/tools/certs/` are gitignored — they are yours alone.
 
 ## Credits & sources
 
 - [smakosh — replacing a Samsung TV home screen with an AI agent](https://smakosh.com/blog/replacing-samsung-tv-home-screen-with-ai)
-  (the `__NO_RAISE_WINDOW` wrapper pattern, 2024+ cert gate)
-- [arn0-tv](https://github.com/NelsonEU/arn0-tv) (home_appid / app-control
-  operation mechanics)
-- [anandhuremanan/samsung-tizen-clock-app](https://github.com/anandhuremanan/samsung-tizen-clock-app)
-  (`make_samsung_cert.py`)
-- Signing algorithm derived from the **tizensdk.tizentv** VS Code extension
-  (Apache-2.0)
+- [arn0-tv](https://github.com/NelsonEU/arn0-tv) ·
+  [anandhuremanan/samsung-tizen-clock-app](https://github.com/anandhuremanan/samsung-tizen-clock-app)
+  (cert script) · signing algorithm derived from the **tizensdk.tizentv**
+  VS Code extension (Apache-2.0)
 - App IDs from [xchwarze/samsung-tv-ws-api](https://github.com/xchwarze/samsung-tv-ws-api/blob/master/APPLICATIONS.md),
   [ollo69/ha-samsungtv-smart](https://github.com/ollo69/ha-samsungtv-smart/blob/master/docs/App_list.md),
   [rs.ltd](https://rs.ltd/apps/remote-control-tv/custom-apps/samsung)
+- webOS SSAP details from [go-webos](https://pkg.go.dev/github.com/kaperys/go-webos)
+  and the [LG developer forum](https://forum.webostv.developer.lge.com/t/sending-remote-press-via-the-command-line/19147)
 - Context: [TechCrunch — people are using AI to make their smart TVs dumb again](https://techcrunch.com/2026/10/19/people-are-using-ai-to-make-their-smart-tvs-dumb-again/)
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Do what you want; breakage is your own.
-Modifying your own TV is legal; just know that firmware updates can
-revert the Home redirect (re-run `install.sh`) and that a bad day can
-require `restore-home.sh` — which is why it exists.
+MIT — see [LICENSE](LICENSE). Modifying your own TV is legal; firmware
+updates can revert the Home redirect (re-run the installer) and a bad day
+can require the rollback script — which is why it exists.
