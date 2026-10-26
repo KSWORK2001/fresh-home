@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<widget xmlns="http://tizen.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets"
+        id="https://karan.dev/freshhomekey" version="1.0.0" viewmodes="fullscreen">
+  <tizen:application id="fhkey0001.key" package="fhkey0001" required_version="2.4"/>
+  <content src="index.html"/>
+  <name>Fresh Home Key</name>
+  <tizen:profile name="TV"/>
+  <tizen:privilege name="http://tizen.org/privilege/application.launch"/>
+</widget>

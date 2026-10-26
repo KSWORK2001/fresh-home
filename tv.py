@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+"""Fast local launcher + remote for a Samsung Tizen TV. Zero dependencies.
+
+  python3 tv.py discover        find the TV on this network
+  python3 tv.py pair            one-time pairing (press Allow on the TV)
+  python3 tv.py apps            list the app catalog (apps.json)
+  python3 tv.py launch <query>  launch an app (fuzzy): tv.py launch netflix
+  python3 tv.py key <KEY>       send a key: KEY_VOLUP, KEY_MUTE, KEY_HOME…
+  python3 tv.py power           power toggle
+  python3 tv.py wake            wake the TV (Wake-on-LAN)
+  python3 tv.py serve           web launcher UI (default port 8590)
+"""
+
+import argparse
+import difflib
+import json
+import os
+import socket
+import sys
+import threading
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import discover
+import samsung
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+LOCK = threading.Lock()
+PAIRING = {"active": False, "message": ""}
+
+
+# ------------------------------------------------------------------ cli ----
+
+def cmd_discover(args):
+    return discover.main()
+
+
+def cmd_pair(args):
+    cfg = samsung.load_config()
+    if not cfg.get("ip"):
+        print("TV not configured — run:  python3 discover.py")
+        return 1
+    print(f"Pairing with {cfg.get('friendly') or 'the TV'} at {cfg['ip']}…")
+    tv = samsung.SamsungTV(cfg["ip"], None, "Mac Launcher", cfg.get("port") or 8002)
+    tv.pair()
+    samsung.save_config(token=tv.token, port=tv.port, encoding=tv.encoding)
+    print("✓ Paired — token saved. You never have to do this again.")
+    return 0
+
+
+def cmd_apps(args):
+    for a in samsung.catalog_apps():
+        print(f"{a['appId']:>20}  {a['name']}")
+    return 0
+
+
+def _pick(query):
+    apps = samsung.catalog_apps()
+    q = query.lower().strip()
+    for a in apps:
+        ids = [a["appId"]] + a.get("alt", [])
+        if query in ids or a["name"].lower() == q:
+            return a
+    close = difflib.get_close_matches(q, [a["name"].lower() for a in apps], n=1, cutoff=0.3)
+    if close:
+        return next(a for a in apps if a["name"].lower() == close[0])
+    return None
+
+
+def cmd_launch(args):
+    tv, _ = samsung.get_tv()
+    app = _pick(args.app)
+    if not app:
+        print(f'No app matching "{args.app}". See:  python3 tv.py apps')
+        return 1
+    print(f"Launching {app['name']}…")
+    tv.launch(app["appId"])
+    return 0
+
+
+def cmd_key(args):
+    tv, _ = samsung.get_tv()
+    tv.key(args.key.upper())
+    return 0
+
+
+def cmd_power(args):
+    tv, _ = samsung.get_tv()
+    tv.power()
+    return 0
+
+
+def cmd_wake(args):
+    cfg = samsung.load_config()
+    if not cfg.get("mac"):
+        print("No MAC in config.json (run discover.py while the TV is awake).")
+        return 1
+    samsung.wol(cfg["mac"])
+    print("Wake-on-LAN packets sent.")
+    return 0
+
+
+# ---------------------------------------------------------------- server ----
+
+def _tv_from_config():
+    cfg = samsung.load_config()
+    if not cfg.get("ip"):
+        return None, cfg
+    tv = samsung.SamsungTV(cfg["ip"], cfg.get("token"), cfg.get("tv_name") or "Mac Launcher",
+                           cfg.get("port") or 8002, cfg.get("encoding"))
+    return tv, cfg
+
+
+def make_handler():
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "TVLauncher/1.0"
+
+        def log_message(self, *a):
+            pass
+
+        def _json(self, obj, code=200):
+            body = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _body(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            return json.loads(self.rfile.read(n) or b"{}")
+
+        def do_GET(self):
+            try:
+                if self.path in ("/", "/index.html"):
+                    with open(os.path.join(HERE, "index.html"), "rb") as f:
+                        body = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                elif self.path == "/api/status":
+                    tv, cfg = _tv_from_config()
+                    self._json({
+                        "found": bool(cfg.get("ip")),
+                        "paired": bool(cfg.get("token")) or cfg.get("port") == 8001,
+                        "ip": cfg.get("ip"), "model": cfg.get("model"),
+                        "friendly": cfg.get("friendly"),
+                        "pairing": PAIRING["active"],
+                        "pairing_message": PAIRING["message"],
+                    })
+                elif self.path == "/api/apps":
+                    tv, cfg = _tv_from_config()
+                    if not tv:
+                        self._json({"error": "TV not discovered yet"}, 409)
+                    else:
+                        self._json({"apps": samsung.catalog_apps()})
+                else:
+                    self._json({"error": "not found"}, 404)
+            except Exception as e:
+                self._json({"error": f"TV unreachable: {e}"}, 503)
+
+        def do_POST(self):
+            try:
+                if self.path == "/api/launch":
+                    body = self._body()
+                    tv, _ = _tv_from_config()
+                    with LOCK:
+                        tv.launch(body.get("id", ""))
+                    self._json({"ok": True})
+                elif self.path == "/api/key":
+                    body = self._body()
+                    tv, _ = _tv_from_config()
+                    with LOCK:
+                        tv.key(body.get("key", ""))
+                    self._json({"ok": True})
+                elif self.path == "/api/power":
+                    tv, _ = _tv_from_config()
+                    with LOCK:
+                        tv.power()
+                    self._json({"ok": True})
+                elif self.path == "/api/wake":
+                    cfg = samsung.load_config()
+                    ok = samsung.wol(cfg.get("mac", ""))
+                    self._json({"ok": ok})
+                elif self.path == "/api/pair":
+                    if PAIRING["active"]:
+                        self._json({"ok": True, "started": False})
+                        return
+
+                    def run():
+                        PAIRING.update(active=True, message="Looking for the TV…")
+                        try:
+                            cfg = samsung.load_config()
+                            if not cfg.get("ip"):
+                                rec = discover.find_tv(verbose=False)
+                                if not rec:
+                                    PAIRING.update(active=False,
+                                                   message="No TV found — turn it on and re-scan")
+                                    return
+                                cfg = samsung.save_config(ip=rec["ip"], mac=rec.get("mac"),
+                                                          model=rec.get("model"),
+                                                          friendly=rec.get("friendly"))
+                            PAIRING.update(message="Waiting for Allow on the TV…")
+                            tv = samsung.SamsungTV(cfg["ip"], None, "Mac Launcher",
+                                                   cfg.get("port") or 8002)
+                            tv.pair(log=lambda m: PAIRING.update(message=m.strip(" →…")))
+                            samsung.save_config(token=tv.token, port=tv.port,
+                                                encoding=tv.encoding)
+                            PAIRING.update(active=False, message="")
+                        except Exception as e:
+                            PAIRING.update(active=False, message=str(e))
+
+                    threading.Thread(target=run, daemon=True).start()
+                    self._json({"ok": True, "started": True})
+                elif self.path == "/api/discover":
+                    rec = discover.find_tv(verbose=False)
+                    self._json({"ok": bool(rec)})
+                else:
+                    self._json({"error": "not found"}, 404)
+            except Exception as e:
+                self._json({"error": str(e)}, 500)
+
+    return Handler
+
+
+def _lan_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except OSError:
+        return None
+
+
+def cmd_serve(args):
+    cfg = samsung.load_config()
+    if not cfg.get("ip"):
+        print("No TV configured — discovering…")
+        if not discover.find_tv(verbose=True):
+            print("Couldn't find the TV. Turn it on / check Wi-Fi, then: python3 tv.py serve")
+            return 1
+        cfg = samsung.load_config()
+
+    port, httpd = args.port, None
+    for _ in range(10):
+        try:
+            httpd = ThreadingHTTPServer(("0.0.0.0", port), make_handler())
+            break
+        except OSError:
+            port += 1
+    if not httpd:
+        print("Could not bind a port.")
+        return 1
+
+    print(f"\n  TV launcher →  http://localhost:{port}")
+    lan = _lan_ip()
+    if lan:
+        print(f"  from phone →   http://{lan}:{port}")
+    paired = bool(cfg.get("token")) or cfg.get("port") == 8001
+    print(f"  TV: {cfg.get('friendly') or cfg['ip']} ({cfg['ip']})"
+          f"  —  {'paired ✓' if paired else 'needs pairing (click Pair in the web UI)'}\n")
+
+    if not args.no_browser:
+        threading.Timer(0.5, lambda: webbrowser.open(f"http://localhost:{port}")).start()
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nbye")
+    return 0
+
+
+# ------------------------------------------------------------------ main ----
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("discover").set_defaults(fn=cmd_discover)
+    sub.add_parser("pair").set_defaults(fn=cmd_pair)
+    sub.add_parser("apps").set_defaults(fn=cmd_apps)
+    sp = sub.add_parser("launch")
+    sp.add_argument("app")
+    sp.set_defaults(fn=cmd_launch)
+    sp = sub.add_parser("key")
+    sp.add_argument("key")
+    sp.set_defaults(fn=cmd_key)
+    sub.add_parser("power").set_defaults(fn=cmd_power)
+    sub.add_parser("wake").set_defaults(fn=cmd_wake)
+    sp = sub.add_parser("serve")
+    sp.add_argument("--port", type=int, default=8590)
+    sp.add_argument("--no-browser", action="store_true")
+    sp.set_defaults(fn=cmd_serve)
+    args = p.parse_args()
+    try:
+        rc = args.fn(args) or 0
+    except KeyboardInterrupt:
+        rc = 130
+    except (samsung.TVError, OSError) as e:
+        print(f"error: {e}")
+        rc = 1
+    sys.exit(rc)
+
+
+if __name__ == "__main__":
+    main()

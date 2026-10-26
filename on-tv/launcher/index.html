@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1920">
+  <title>Fresh Home</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <span id="time">–:––</span><span id="ampm"></span>
+      <span id="date"></span>
+    </header>
+
+    <main id="viewport">
+      <div id="grid" role="listbox" aria-label="Apps"></div>
+    </main>
+
+    <section id="browse" hidden>
+      <div class="browse-head">
+        <span class="browse-title">GET APPS</span>
+        <span class="browse-hint">OK ADD / REMOVE&ensp;·&ensp;BACK RETURN</span>
+      </div>
+      <div id="browse-viewport">
+        <div id="browse-list"></div>
+      </div>
+    </section>
+
+    <footer>
+      <span>D-PAD NAVIGATE&ensp;·&ensp;OK OPEN&ensp;·&ensp;GET APPS FOR MORE</span>
+      <span class="wordmark">FRESH&nbsp;HOME</span>
+    </footer>
+
+    <div id="toast"></div>
+  </div>
+
+  <script src="js/catalog.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

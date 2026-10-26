@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Fresh Home Key</title>
+  <style>html, body { background: #000; }</style>
+</head>
+<body>
+<script>
+/* Home-key wrapper. The TV relaunches its home app via a special path
+   (__NO_RAISE_WINDOW) that leaves a directly-registered launcher stuck
+   behind the loading screen. So home_appid points HERE instead: this app
+   starts, launches the real launcher normally, then exits (~0.2 s). */
+(function () {
+  'use strict';
+  var LAUNCHER = 'freshhome.launcher';
+
+  function stop() {
+    try { tizen.application.getCurrentApplication().exit(); } catch (e) {}
+  }
+  function go() {
+    try {
+      tizen.application.launch(LAUNCHER, function () { setTimeout(stop, 150); },
+                                        function () { setTimeout(stop, 150); });
+    } catch (e) { stop(); }
+  }
+  window.addEventListener('load', function () { setTimeout(go, 0); });
+  setTimeout(stop, 2000); // hard stop no matter what
+})();
+</script>
+</body>
+</html>

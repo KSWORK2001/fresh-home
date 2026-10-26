@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<widget xmlns="http://tizen.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets"
+        id="https://karan.dev/freshhome" version="1.0.0" viewmodes="maximized">
+  <tizen:application id="freshhome.launcher" package="freshhome" required_version="2.4"/>
+  <content src="index.html"/>
+  <name>Fresh Home</name>
+  <tizen:profile name="TV"/>
+  <tizen:setting screen-orientation="landscape" context-menu="disabled"/>
+  <tizen:privilege name="http://tizen.org/privilege/application.launch"/>
+  <tizen:privilege name="http://tizen.org/privilege/application.info"/>
+  <tizen:privilege name="http://tizen.org/privilege/tvinputdevice"/>
+  <!-- Declaring the main operation + reload="disable" is what lets this app
+       answer the Home/power-on launch (required manifest schema: 2.4+). -->
+  <tizen:app-control>
+    <tizen:src name="index.html" reload="disable"/>
+    <tizen:operation name="http://tizen.org/appcontrol/operation/main"/>
+  </tizen:app-control>
+</widget>

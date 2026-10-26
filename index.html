@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TV Launcher</title>
+<style>
+  :root {
+    --bg:#0a0c10; --panel:#141920; --tile:#1a212b; --tile-hover:#223041;
+    --text:#e8edf4; --dim:#8b98a9; --accent:#4da3ff; --line:#232c38;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  [hidden] { display:none !important; }
+  body {
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    min-height:100vh; padding:24px clamp(16px, 4vw, 48px) 60px;
+  }
+  header { display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin-bottom:14px; }
+  h1 { font-size:22px; font-weight:700; letter-spacing:.2px; }
+  .sub { color:var(--dim); font-size:13px; }
+  .dim { color:var(--dim); }
+  .dot { width:8px; height:8px; border-radius:50%; background:#3fbf62; display:inline-block; margin-right:6px; }
+  .dot.warn { background:#f2b73f; } .dot.off { background:#666; }
+  .box {
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:14px 16px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:16px;
+  }
+  #search {
+    width:100%; max-width:420px; background:var(--panel); border:1px solid var(--line);
+    color:var(--text); font-size:15px; padding:10px 14px; border-radius:10px; outline:none;
+    margin:4px 0 16px;
+  }
+  #search:focus { border-color:var(--accent); }
+  .row-label { color:var(--dim); font-size:12px; text-transform:uppercase; letter-spacing:1.2px; margin:16px 0 10px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:10px; }
+  .tile {
+    background:var(--tile); border:1px solid #222b37; border-radius:12px; padding:14px;
+    cursor:pointer; display:flex; align-items:center; gap:12px; user-select:none;
+    transition:background .12s, transform .05s;
+  }
+  .tile:hover { background:var(--tile-hover); }
+  .tile:active { transform:scale(.98); }
+  .tile.launched { border-color:var(--accent); }
+  .glyph {
+    width:38px; height:38px; border-radius:9px; flex:none;
+    display:flex; align-items:center; justify-content:center;
+    font-weight:700; font-size:17px; color:#fff;
+  }
+  .tile .name { font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .remote {
+    margin-top:28px; background:var(--panel); border:1px solid var(--line);
+    border-radius:14px; padding:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+  }
+  button.key {
+    background:var(--tile); color:var(--text); border:1px solid #26303d; border-radius:9px;
+    min-width:46px; height:42px; font-size:15px; cursor:pointer; padding:0 12px;
+  }
+  button.key:hover { background:var(--tile-hover); }
+  button.key:active { background:var(--accent); color:#04101e; }
+  button.accent { background:var(--accent); color:#06101c; border:none; font-weight:600; height:38px; padding:0 16px; }
+  button.accent:disabled { opacity:.5; cursor:default; }
+  .pad { display:grid; grid-template-columns:repeat(3, 46px); gap:6px; justify-items:stretch; }
+  .pad i { height:0; }
+  .toast {
+    position:fixed; bottom:22px; left:50%; transform:translateX(-50%);
+    background:#1d2632; border:1px solid var(--line); padding:10px 18px;
+    border-radius:10px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none;
+    max-width:80vw; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .toast.show { opacity:1; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>TV Launcher</h1>
+    <span class="sub" id="tvinfo">connecting…</span>
+  </header>
+
+  <div id="pairbox" class="box" hidden>
+    <div><b>One-time pairing.</b> Click <b>Pair</b>, then press <b>Allow</b> on the TV when the popup appears.</div>
+    <button id="pairbtn" class="accent">Pair with TV</button>
+    <span id="pairmsg" class="sub"></span>
+  </div>
+  <div id="scanbox" class="box" hidden>
+    <div><b>No TV found yet.</b> Turn the TV on, make sure it's on this Wi-Fi, then re-scan.</div>
+    <button id="scanbtn" class="accent">Re-scan network</button>
+  </div>
+
+  <input id="search" placeholder="Filter apps…   ( / to focus )" autocomplete="off">
+  <div class="row-label" id="recentlabel" hidden>Recent</div>
+  <div class="grid" id="recent"></div>
+  <div class="row-label">All apps</div>
+  <div class="grid" id="apps"></div>
+  <div class="sub" id="empty" hidden>No apps match.</div>
+  <div class="sub" style="margin-top:10px">Missing an app? Add its ID to <b>tv-launcher/apps.json</b> —
+    lookup: <a style="color:var(--accent)" href="https://rs.ltd/apps/remote-control-tv/custom-apps/samsung" target="_blank">Samsung app-ID list</a></div>
+
+  <div class="remote" id="remote" hidden>
+    <button class="key" data-key="KEY_VOLDOWN">Vol −</button>
+    <button class="key" data-key="KEY_VOLUP">Vol +</button>
+    <button class="key" data-key="KEY_MUTE">Mute</button>
+    <button class="key" data-key="KEY_HOME">Home</button>
+    <button class="key" data-key="KEY_RETURN">Back</button>
+    <span class="pad">
+      <i></i><button class="key" data-key="KEY_UP">▲</button><i></i>
+      <button class="key" data-key="KEY_LEFT">◀</button>
+      <button class="key" data-key="KEY_ENTER">OK</button>
+      <button class="key" data-key="KEY_RIGHT">▶</button>
+      <i></i><button class="key" data-key="KEY_DOWN">▼</button><i></i>
+    </span>
+    <button class="key" data-key="KEY_PLAY">▶︎</button>
+    <button class="key" data-key="KEY_PAUSE">❚❚</button>
+    <button class="key" id="wakebtn">Wake TV</button>
+    <button class="key" data-key="KEY_POWER" data-confirm="1">⏻ Power</button>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+  const $ = s => document.querySelector(s);
+  const appsEl = $('#apps'), recentEl = $('#recent'), search = $('#search');
+  let APPS = [];
+  let recent = JSON.parse(localStorage.getItem('tv.recent') || '[]');
+  let filter = '';
+
+  async function api(path, body) {
+    const r = await fetch(path, body
+      ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+      : undefined);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    return j;
+  }
+
+  function toast(msg, bad) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.style.borderColor = bad ? '#a33' : 'var(--line)';
+    t.classList.add('show');
+    clearTimeout(t._h);
+    t._h = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+
+  function hue(name) {
+    let h = 0;
+    for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
+    return h;
+  }
+
+  function tile(app) {
+    const d = document.createElement('div');
+    d.className = 'tile';
+    const h = hue(app.name || '?');
+    d.innerHTML =
+      `<div class="glyph" style="background:linear-gradient(140deg,hsl(${h},48%,44%),hsl(${(h + 45) % 360},52%,28%))">` +
+      `${((app.name || '?').trim()[0] || '?').toUpperCase()}</div><div class="name"></div>`;
+    d.querySelector('.name').textContent = app.name;
+    d.title = app.appId;
+    d.onclick = () => launch(app, d);
+    return d;
+  }
+
+  function render() {
+    const f = filter.trim().toLowerCase();
+    const list = APPS.filter(a => !f || a.name.toLowerCase().includes(f));
+    appsEl.replaceChildren(...list.map(tile));
+    const rec = recent.map(r => APPS.find(a => a.appId === r.appId)).filter(Boolean);
+    $('#recentlabel').hidden = rec.length === 0;
+    recentEl.replaceChildren(...rec.map(tile));
+    $('#empty').hidden = !(APPS.length > 0 && list.length === 0);
+  }
+
+  async function launch(app, el) {
+    if (el) el.classList.add('launched');
+    try {
+      await api('/api/launch', { id: app.appId });
+      toast('Launching ' + app.name);
+    } catch (e) {
+      toast(e.message, true);
+    }
+    setTimeout(() => el && el.classList.remove('launched'), 700);
+    recent = [{ appId: app.appId, name: app.name },
+              ...recent.filter(r => r.appId !== app.appId)].slice(0, 6);
+    localStorage.setItem('tv.recent', JSON.stringify(recent));
+    render();
+  }
+
+  async function refresh() {
+    try {
+      const st = await api('/api/status');
+      const cls = st.paired ? '' : (st.found ? 'warn' : 'off');
+      $('#tvinfo').innerHTML =
+        `<span class="dot ${cls}"></span>${st.friendly || st.ip || 'TV not found'}` +
+        ` <span class="dim">· ${st.model || ''}</span>`;
+      $('#scanbox').hidden = !!st.found;
+      $('#pairbox').hidden = !st.found || !!st.paired;
+      if (st.found && !st.paired) {
+        $('#pairbtn').disabled = st.pairing;
+        $('#pairmsg').textContent = st.pairing_message || '';
+      }
+      if (st.paired && !APPS.length) {
+        try {
+          const j = await api('/api/apps');
+          APPS = j.apps;
+          $('#remote').hidden = false;
+          render();
+        } catch (e) { /* TV may be asleep; keep polling */ }
+      }
+    } catch (e) { /* server not up yet */ }
+  }
+
+  async function key(k) {
+    try { await api('/api/key', { key: k }); }
+    catch (e) { toast(e.message, true); }
+  }
+
+  search.addEventListener('input', () => { filter = search.value; render(); });
+  search.addEventListener('keydown', e => {
+    if (e.key === 'Enter') appsEl.querySelector('.tile')?.click();
+    if (e.key === 'Escape') search.blur();
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === '/' && e.target !== search) { e.preventDefault(); search.focus(); return; }
+    if (e.target === search) return;
+    const map = {
+      ArrowUp: 'KEY_UP', ArrowDown: 'KEY_DOWN', ArrowLeft: 'KEY_LEFT', ArrowRight: 'KEY_RIGHT',
+      Enter: 'KEY_ENTER', Backspace: 'KEY_RETURN', m: 'KEY_MUTE', h: 'KEY_HOME',
+      '+': 'KEY_VOLUP', '-': 'KEY_VOLDOWN', ' ': 'KEY_PLAY', p: 'KEY_PAUSE',
+    };
+    const k = map[e.key];
+    if (!k) return;
+    e.preventDefault();
+    key(k);
+  });
+
+  $('#pairbtn').onclick = async () => {
+    try { await api('/api/pair'); toast('Check the TV — press Allow'); }
+    catch (e) { toast(e.message, true); }
+  };
+  $('#scanbtn').onclick = async () => {
+    try { await api('/api/discover'); location.reload(); }
+    catch (e) { toast(e.message, true); }
+  };
+  $('#wakebtn').onclick = async () => {
+    try { await api('/api/wake'); toast('Wake packet sent'); }
+    catch (e) { toast(e.message, true); }
+  };
+  for (const b of document.querySelectorAll('button[data-key]')) {
+    b.onclick = () => {
+      if (b.dataset.confirm && !confirm('Toggle TV power?')) return;
+      key(b.dataset.key);
+    };
+  }
+
+  refresh();
+  setInterval(refresh, 4000);
+</script>
+</body>
+</html>

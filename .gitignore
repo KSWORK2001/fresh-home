@@ -1,0 +1,16 @@
+# Secrets — never publish these
+# config.json = your TV's IP + pairing token
+config.json
+# your TV's original home-screen settings
+home-backup.txt
+# signing keys (author.p12, Samsung certs, password.txt)
+on-tv/tools/certs/
+
+# Build artifacts
+*.wgt
+on-tv/launcher/js/catalog.js
+
+# OS / tooling noise
+__pycache__/
+.DS_Store
+*.log
