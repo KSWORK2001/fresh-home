@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Controller Bridge — Fresh Home</title>
+<style>
+  :root { --bg:#0a0c10; --panel:#141920; --text:#e8edf4; --dim:#8b98a9;
+          --ok:#7EC98F; --bad:#e06c6c; --accent:#4da3ff; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); min-height:100vh;
+         font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         display:flex; align-items:center; justify-content:center; padding:24px; }
+  .card { max-width:560px; width:100%; }
+  h1 { font-size:22px; font-weight:700; margin-bottom:6px; }
+  .sub { color:var(--dim); font-size:14px; margin-bottom:26px; }
+  .status { display:flex; align-items:center; gap:12px; background:var(--panel);
+            border:1px solid #232c38; border-radius:12px; padding:16px 18px;
+            font-size:15px; margin-bottom:14px; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--bad); flex:none; }
+  .dot.on { background:var(--ok); }
+  .pads { background:var(--panel); border:1px solid #232c38; border-radius:12px;
+          padding:16px 18px; font-size:15px; }
+  .pads .none { color:var(--dim); }
+  .pads ul { list-style:none; }
+  .pads li { padding:3px 0; display:flex; justify-content:space-between; gap:20px; }
+  .pads li span:last-child { color:var(--dim); font-size:13px; }
+  .hint { margin-top:18px; color:var(--dim); font-size:13px; line-height:1.6; }
+  .hint b { color:var(--text); font-weight:600; }
+  kbd { background:#1a212b; border:1px solid #26303d; border-radius:5px;
+        padding:1px 7px; font-size:12px; font-family:inherit; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Controller Bridge</h1>
+  <div class="sub">Plug in or connect a gamepad, then play — input streams to the TV.</div>
+  <div class="status"><span class="dot" id="dot"></span><span id="status">connecting…</span></div>
+  <div class="pads" id="pads"><span class="none">No controller detected yet — press any button on it.</span></div>
+  <div class="hint">
+    No controller? The keyboard works too: <kbd>←↑↓→</kbd>/<kbd>WASD</kbd> move,
+    <kbd>Space</kbd>/<kbd>Z</kbd> = A, <kbd>X</kbd> = B.<br>
+    On the TV: <b>Games → Controller Bridge</b> must show CONNECTED.
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var dot = document.getElementById('dot'), status = document.getElementById('status');
+  var padsEl = document.getElementById('pads');
+  var ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/bridge');
+  var last = '';
+
+  ws.onopen = function () { dot.classList.add('on'); status.textContent = 'connected — streaming to the TV'; };
+  ws.onclose = function () { dot.classList.remove('on'); status.textContent = 'disconnected — reload this page'; };
+  ws.onerror = function () { status.textContent = 'connection error — is tv.py serve running?'; };
+
+  var keys = {};
+  addEventListener('keydown', function (e) { keys[e.keyCode] = true; });
+  addEventListener('keyup', function (e) { keys[e.keyCode] = false; });
+
+  function readPads() {
+    var s = { up: 0, down: 0, left: 0, right: 0, a: 0, b: 0, start: 0 };
+    var pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    var names = [];
+    for (var i = 0; i < pads.length; i++) {
+      var p = pads[i];
+      if (!p || !p.connected) continue;
+      names.push(p.id);
+      var lx = p.axes[0] || 0, ly = p.axes[1] || 0;
+      if ((p.buttons[12] && p.buttons[12].pressed) || ly < -0.5) s.up = 1;
+      if ((p.buttons[13] && p.buttons[13].pressed) || ly > 0.5) s.down = 1;
+      if ((p.buttons[14] && p.buttons[14].pressed) || lx < -0.5) s.left = 1;
+      if ((p.buttons[15] && p.buttons[15].pressed) || lx > 0.5) s.right = 1;
+      if (p.buttons[0] && p.buttons[0].pressed) s.a = 1;
+      if (p.buttons[1] && p.buttons[1].pressed) s.b = 1;
+      if (p.buttons[9] && p.buttons[9].pressed) s.start = 1;
+    }
+    if (names.length) {
+      padsEl.innerHTML = '<ul>' + names.map(function (n) {
+        return '<li><span>' + n.replace(/\s+/g, ' ').trim().slice(0, 48) + '</span><span>active</span></li>';
+      }).join('') + '</ul>';
+    }
+    // keyboard fallback merged in
+    if (keys[38] || keys[87]) s.up = 1;
+    if (keys[40] || keys[83]) s.down = 1;
+    if (keys[37] || keys[65]) s.left = 1;
+    if (keys[39] || keys[68]) s.right = 1;
+    if (keys[32] || keys[90] || keys[13]) s.a = 1;
+    if (keys[88]) s.b = 1;
+    if (keys[27]) s.start = 1;
+    return s;
+  }
+
+  function loop() {
+    var s = readPads();
+    var sig = JSON.stringify(s);
+    if (sig !== last && ws.readyState === 1) {
+      last = sig;
+      ws.send(JSON.stringify({ t: 's', s: s }));
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

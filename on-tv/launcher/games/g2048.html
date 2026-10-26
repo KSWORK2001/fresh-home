@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=1920">
+<title>2048 — Fresh Home</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0A0C0E; overflow: hidden;
+               font-family: "Segoe UI", Roboto, Arial, sans-serif; color: #F4F5F7; }
+  #stage { width: 1920px; height: 1080px; transform-origin: 0 0; position: relative; }
+  .title { position: absolute; top: 60px; left: 96px; font-size: 26px;
+           letter-spacing: .22em; color: rgba(244,245,247,.45); }
+  .hud { position: absolute; top: 110px; left: 96px; width: 300px; }
+  .hud .t { font-size: 22px; letter-spacing: .18em; color: rgba(244,245,247,.4); }
+  .hud .v { font-size: 56px; font-weight: 300; margin-bottom: 40px; font-variant-numeric: tabular-nums; }
+  #board { position: absolute; top: 110px; left: 620px; width: 800px; height: 800px;
+           background: #15171B; border: 1px solid rgba(255,255,255,0.07);
+           border-radius: 16px; display: grid; grid-template-columns: repeat(4, 1fr);
+           gap: 14px; padding: 14px; box-sizing: border-box; }
+  .cell { background: rgba(255,255,255,0.03); border-radius: 10px;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 72px; font-weight: 600; }
+  .t2 { background: rgba(244,245,247,0.10); } .t4 { background: rgba(244,245,247,0.16); }
+  .t8 { background: rgba(244,245,247,0.24); } .t16 { background: rgba(244,245,247,0.32); }
+  .t32 { background: rgba(244,245,247,0.42); } .t64 { background: rgba(244,245,247,0.52); }
+  .t128, .t256, .t512 { background: rgba(244,245,247,0.64); color: #0A0C0E; }
+  .t1024, .t2048 { background: #F4F5F7; color: #0A0C0E; }
+  .t128, .t256, .t512, .t1024, .t2048 { font-size: 58px; }
+  #msg { position: absolute; left: 0; right: 0; top: 950px; text-align: center;
+         font-size: 32px; letter-spacing: .1em; color: rgba(244,245,247,.6); display: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="title">2048</div>
+  <div class="hud"><div class="t">SCORE</div><div class="v" id="score">0</div>
+                   <div class="t">BEST</div><div class="v" id="best">0</div></div>
+  <div id="board"></div>
+  <div id="msg"></div>
+</div>
+<script src="../js/input.js"></script>
+<script>
+(function () {
+  'use strict';
+  var stage = document.getElementById('stage');
+  function fit() { stage.style.transform = 'scale(' + (innerWidth / 1920) + ')'; }
+  addEventListener('resize', fit); fit();
+
+  var board = document.getElementById('board');
+  var grid, score, best = +(localStorage.getItem('freshhome.2048.best') || 0), over;
+  document.getElementById('best').textContent = best;
+
+  function reset() {
+    grid = Array.from({ length: 4 }, function () { return [0, 0, 0, 0]; });
+    score = 0; over = false;
+    add(); add(); render();
+    document.getElementById('msg').style.display = 'none';
+  }
+  function add() {
+    var free = [];
+    for (var r = 0; r < 4; r++) for (var c = 0; c < 4; c++) if (!grid[r][c]) free.push([r, c]);
+    if (!free.length) return;
+    var p = free[(Math.random() * free.length) | 0];
+    grid[p[0]][p[1]] = Math.random() < 0.9 ? 2 : 4;
+  }
+  function slide(row) {
+    var v = row.filter(function (x) { return x; }), out = [], gained = 0;
+    for (var i = 0; i < v.length; i++) {
+      if (i + 1 < v.length && v[i] === v[i + 1]) { out.push(v[i] * 2); gained += v[i] * 2; i++; }
+      else out.push(v[i]);
+    }
+    while (out.length < 4) out.push(0);
+    return { row: out, gained: gained };
+  }
+  function move(dir) {
+    var moved = false, gained = 0;
+    var get = function (i, j) {
+      return dir === 'l' || dir === 'r' ? grid[i][j] : grid[j][i];
+    };
+    var put = function (i, j, x) {
+      if (dir === 'l' || dir === 'r') grid[i][j] = x; else grid[j][i] = x;
+    };
+    for (var i = 0; i < 4; i++) {
+      var line = [];
+      for (var j = 0; j < 4; j++) line.push(dir === 'l' || dir === 'u' ? get(i, j) : get(i, 3 - j));
+      var res = slide(line);
+      gained += res.gained;
+      for (var k = 0; k < 4; k++) {
+        var target = dir === 'l' || dir === 'u' ? k : 3 - k;
+        if (get(i, target) !== res.row[k]) moved = true;
+        put(i, target, res.row[k]);
+      }
+    }
+    if (moved) {
+      score += gained;
+      add();
+      if (score > best) { best = score; localStorage.setItem('freshhome.2048.best', best); }
+      render();
+      if (stuck()) { over = true; var m = document.getElementById('msg');
+        m.textContent = 'NO MOVES LEFT — SCORE ' + score + ' · OK TO RESTART';
+        m.style.display = 'block'; }
+    }
+  }
+  function stuck() {
+    for (var r = 0; r < 4; r++) for (var c = 0; c < 4; c++) {
+      if (!grid[r][c]) return false;
+      if (c < 3 && grid[r][c] === grid[r][c + 1]) return false;
+      if (r < 3 && grid[r][c] === grid[r + 1][c]) return false;
+    }
+    return true;
+  }
+  function render() {
+    board.innerHTML = '';
+    for (var r = 0; r < 4; r++) for (var c = 0; c < 4; c++) {
+      var d = document.createElement('div');
+      var v = grid[r][c];
+      d.className = 'cell' + (v ? ' t' + v : '');
+      d.textContent = v || '';
+      board.appendChild(d);
+    }
+    document.getElementById('score').textContent = score;
+    document.getElementById('best').textContent = best;
+  }
+
+  function poll() {
+    var s = FreshInput.state();
+    if (FreshInput.pressed('left')) move('l');
+    else if (FreshInput.pressed('right')) move('r');
+    else if (FreshInput.pressed('up')) move('u');
+    else if (FreshInput.pressed('down')) move('d');
+    if (over && FreshInput.pressed('a')) reset();
+    FreshInput.endFrame();
+    requestAnimationFrame(poll);
+  }
+  reset();
+  requestAnimationFrame(poll);
+})();
+</script>
+</body>
+</html>

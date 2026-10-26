@@ -23,9 +23,23 @@
       alt: ['org.tizen.live-tv'], system: true },
     { name: 'Web Browser', appId: 'org.tizen.browser', color: '#9BB0C4',
       alt: ['3201907018784', '3202010022079'], system: true },
+    { name: 'Games', appId: '__games', system: true },
   ];
   var GET_APPS = { name: 'Get Apps', appId: '__getapps', system: true };
   var STORE_IDS = ['3202102019960', 'org.tizen.apps-store', 'org.tizen.apps'];
+
+  var GAMES = [
+    { name: 'Snake', url: 'games/snake.html' },
+    { name: 'Breakout', url: 'games/breakout.html' },
+    { name: '2048', url: 'games/g2048.html' },
+  ];
+  var BRIDGE_PORT = 8590;
+  var KB_ROWS = [
+    ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '.'],
+    ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+    ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
+    ['z', 'x', 'c', 'v', 'b', 'n', 'm', 'DEL', 'OK']
+  ];
 
   var catalog = (typeof CATALOG !== 'undefined' ? CATALOG : [])
     .filter(function (a) { return a.name !== 'Web Browser'; });
@@ -37,10 +51,20 @@
   var browseEl = document.getElementById('browse');
   var browseList = document.getElementById('browse-list');
   var browseViewport = document.getElementById('browse-viewport');
+  var gamesEl = document.getElementById('games');
+  var gamesList = document.getElementById('games-list');
+  var gamesViewport = document.getElementById('games-viewport');
+  var gameHost = document.getElementById('game-host');
+  var gameFrame = document.getElementById('game-frame');
+  var hostKb = document.getElementById('hostkb');
+  var kbRowsEl = document.getElementById('kb-rows');
+  var kbValue = document.getElementById('kb-value');
 
   var cols = 6, index = 0, topRow = 0, orderedList = [], tiles = [];
   var mode = 'grid';
   var browseIndex = 0, browseTop = 0, browseRows = [];
+  var gamesIndex = 0, gamesTop = 0, gamesRows = [];
+  var kbRow = 0, kbCol = 0, kbBuf = '', kbKeys = [];
   var ROW_H = 76;
 
   // ---- storage --------------------------------------------------------------
@@ -152,6 +176,7 @@
 
   function glyphFor(app) {
     if (app.appId === '__getapps') return '+';
+    if (app.appId === '__games') return '\u25b8';
     if (app.appId === 'org.tizen.tv-viewer') return 'TV';
     return (app.name.trim()[0] || '?').toUpperCase();
   }
@@ -335,12 +360,235 @@
     })(0);
   }
 
+  // ---- games screen + play -------------------------------------------------
+
+  function openGames() {
+    mode = 'games';
+    gamesIndex = 0;
+    gamesTop = 0;
+    buildGamesList();
+    gamesEl.hidden = false;
+    connectBridge();
+  }
+
+  function closeGames() {
+    mode = 'grid';
+    gamesEl.hidden = true;
+    build(ls('freshhome.lastApp', null));
+  }
+
+  function buildGamesList() {
+    gamesList.innerHTML = '';
+    gamesRows = [];
+
+    function row(html, cls, onOk) {
+      var r = document.createElement('button');
+      r.type = 'button';
+      r.className = 'browse-row' + (cls ? ' ' + cls : '');
+      r.innerHTML = html;
+      r.addEventListener('click', onOk);
+      gamesList.appendChild(r);
+      gamesRows.push(r);
+      return r;
+    }
+
+    GAMES.forEach(function (g) {
+      row('<span class="browse-dot" style="background:#F4F5F7"></span>' +
+          '<span class="browse-name">' + g.name + '</span>' +
+          '<span class="browse-id">bundled · offline</span>' +
+          '<span class="browse-state">PLAY</span>',
+          '', function () { playGame(g.url); });
+    });
+
+    row('<span class="browse-dot" style="background:#9BB0C4"></span>' +
+        '<span class="browse-name">Controller Bridge</span>' +
+        '<span class="browse-id">open http://' + bridge.host + ':' + BRIDGE_PORT + '/bridge on your Mac</span>' +
+        '<span class="browse-state" id="bridge-status">' + bridgeStatusLabel() + '</span>',
+        'status-' + bridge.status, function () {
+          if (bridge.status === 'on') bridgeDisconnect();
+          else connectBridge();
+          refreshBridgeRow();
+        });
+
+    row('<span class="browse-dot" style="background:#9BB0C4"></span>' +
+        '<span class="browse-name">Bridge Host</span>' +
+        '<span class="browse-id">companion server address</span>' +
+        '<span class="browse-state">' + escapeHtml(bridge.host) + '</span>',
+        '', function () { openHostKb(); });
+
+    applyListFocus(gamesRows, gamesIndex, gamesViewport, false);
+  }
+
+  function refreshBridgeRow() {
+    var el = document.getElementById('bridge-status');
+    if (el) el.textContent = bridgeStatusLabel();
+    var r = gamesRows[GAMES.length];
+    if (r) r.className = 'browse-row status-' + bridge.status +
+      (r.classList.contains('focused') ? ' focused' : '');
+  }
+
+  function playGame(url) {
+    mode = 'play';
+    gameFrame.src = url;
+    gameHost.hidden = false;
+    gameFrame.focus();
+  }
+
+  function exitGame() {
+    mode = 'games';
+    gameFrame.src = 'about:blank';
+    gameHost.hidden = true;
+  }
+
+  // ---- controller bridge (Mac/phone -> LAN websocket -> here) ---------------
+
+  var bridge = {
+    ws: null, status: 'off', timer: null,
+    host: (function () {
+      try { return localStorage.getItem('freshhome.bridge_host') || '10.0.0.157'; }
+      catch (e) { return '10.0.0.157'; }
+    })()
+  };
+
+  function bridgeStatusLabel() {
+    return bridge.status === 'on' ? 'CONNECTED' :
+           bridge.status === 'connecting' ? 'CONNECTING…' : 'OFFLINE';
+  }
+
+  function connectBridge() {
+    bridgeDisconnect();
+    bridge.status = 'connecting';
+    refreshBridgeRow();
+    try {
+      var ws = new WebSocket('ws://' + bridge.host + ':' + BRIDGE_PORT + '/ws/feed');
+      bridge.ws = ws;
+      ws.onopen = function () { bridge.status = 'on'; refreshBridgeRow(); };
+      ws.onclose = function () {
+        bridge.status = 'off'; bridge.ws = null; refreshBridgeRow();
+        clearTimeout(bridge.timer);
+        bridge.timer = setTimeout(function () {
+          if (mode === 'games' || mode === 'play') connectBridge();
+        }, 5000);
+      };
+      ws.onmessage = function (ev) {
+        if (mode !== 'play') return;
+        try {
+          var m = JSON.parse(ev.data);
+          if (m.t === 's' && gameFrame.contentWindow) {
+            gameFrame.contentWindow.postMessage({ fresh: 'input', s: m.s }, '*');
+          }
+        } catch (e) {}
+      };
+    } catch (e) {
+      bridge.status = 'off';
+      refreshBridgeRow();
+    }
+  }
+
+  function bridgeDisconnect() {
+    clearTimeout(bridge.timer);
+    if (bridge.ws) {
+      var w = bridge.ws;
+      bridge.ws = null;
+      w.onclose = null;
+      try { w.close(); } catch (e) {}
+    }
+  }
+
+  // ---- bridge-host keyboard ---------------------------------------------------
+
+  function openHostKb() {
+    mode = 'hostkb';
+    kbBuf = bridge.host;
+    kbRow = 0; kbCol = 0;
+    kbRowsEl.innerHTML = '';
+    kbKeys = [];
+    KB_ROWS.forEach(function (keys, r) {
+      var rowEl = document.createElement('div');
+      rowEl.className = 'kb-row';
+      var rowKeys = [];
+      keys.forEach(function (k) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'kb-key' + (k.length > 1 ? ' wide' : '');
+        b.textContent = k === 'DEL' ? '\u232b' : k === 'OK' ? 'OK' : k;
+        b.addEventListener('click', function () { kbPress(k); });
+        rowEl.appendChild(b);
+        rowKeys.push(b);
+      });
+      kbRowsEl.appendChild(rowEl);
+      kbKeys.push(rowKeys);
+    });
+    kbValue.textContent = kbBuf;
+    hostKb.hidden = false;
+    applyKbFocus();
+  }
+
+  function closeHostKb(save) {
+    if (save && kbBuf) {
+      bridge.host = kbBuf;
+      try { localStorage.setItem('freshhome.bridge_host', kbBuf); } catch (e) {}
+      connectBridge();
+    }
+    hostKb.hidden = true;
+    mode = 'games';
+    buildGamesList();
+  }
+
+  function applyKbFocus() {
+    kbKeys.forEach(function (row, r) {
+      row.forEach(function (b, c) { b.classList.toggle('focused', r === kbRow && c === kbCol); });
+    });
+    kbValue.textContent = kbBuf;
+  }
+
+  function kbPress(k) {
+    if (k === 'DEL') kbBuf = kbBuf.slice(0, -1);
+    else if (k === 'OK') { closeHostKb(true); return; }
+    else if (kbBuf.length < 30) kbBuf += k;
+    applyKbFocus();
+  }
+
+  function kbMove(dr, dc) {
+    kbCol = Math.max(0, Math.min(KB_ROWS[kbRow].length - 1, kbCol + dc));
+    kbRow = Math.max(0, Math.min(KB_ROWS.length - 1, kbRow + dr));
+    if (kbCol >= KB_ROWS[kbRow].length) kbCol = KB_ROWS[kbRow].length - 1;
+    applyKbFocus();
+  }
+
+  // shared windowed-list focus (games screen uses the same row height/behavior)
+  function applyListFocus(rows, idx, viewportEl, animate) {
+    rows.forEach(function (r, i) { r.classList.toggle('focused', i === idx); });
+    var vh = viewportEl.clientHeight;
+    var visible = Math.max(1, Math.floor(vh / ROW_H));
+    var top = parseInt(viewportEl.dataset.top || '0', 10);
+    if (idx < top) top = idx;
+    if (idx >= top + visible) top = idx - visible + 1;
+    top = Math.max(0, Math.min(top, rows.length - visible));
+    viewportEl.dataset.top = String(top);
+    var listEl = viewportEl.firstElementChild;
+    if (animate === false) listEl.style.transition = 'none';
+    listEl.style.transform = 'translateY(' + (-top * ROW_H) + 'px)';
+    if (animate === false) {
+      void listEl.offsetHeight;
+      listEl.style.transition = '';
+    }
+  }
+
+  function gamesMove(delta) {
+    var next = gamesIndex + delta;
+    if (next < 0 || next >= gamesRows.length) return;
+    gamesIndex = next;
+    applyListFocus(gamesRows, gamesIndex, gamesViewport, true);
+  }
+
   // ---- launching ---------------------------------------------------------------
 
   function activate() {
     var app = orderedList[index];
     if (!app) return;
     if (app.appId === '__getapps') { openBrowse(); return; }
+    if (app.appId === '__games') { openGames(); return; }
 
     var f = loadFreq();
     f[app.appId] = (f[app.appId] || 0) + 1;
@@ -392,6 +640,42 @@
 
   document.addEventListener('keydown', function (e) {
     var k = e.keyCode || e.which;
+
+    if (mode === 'play') {
+      // iframe normally has focus; forward to the game if it does not
+      if (gameFrame.contentWindow) {
+        gameFrame.contentWindow.postMessage({ fresh: 'key', k: k, down: true }, '*');
+      }
+      e.preventDefault();
+      return;
+    }
+    if (mode === 'hostkb') {
+      switch (k) {
+        case 37: kbMove(0, -1); break;
+        case 38: kbMove(-1, 0); break;
+        case 39: kbMove(0, 1); break;
+        case 40: kbMove(1, 0); break;
+        case 13: case 32: kbPress(KB_ROWS[kbRow][kbCol]); break;
+        case 8: kbPress('DEL'); break;
+        case 27: case 461: case 10009: closeHostKb(false); break;
+        default: return;
+      }
+      e.preventDefault();
+      return;
+    }
+
+    if (mode === 'games') {
+      switch (k) {
+        case 38: gamesMove(-1); break;
+        case 40: gamesMove(1); break;
+        case 13: case 32: gamesRows[gamesIndex].click(); break;
+        case 8: case 27: case 461: case 10009: closeGames(); break;
+        default: return;
+      }
+      e.preventDefault();
+      return;
+    }
+
     if (mode === 'browse') {
       switch (k) {
         case 38: browseMove(-1); break;                       // Up
@@ -415,6 +699,18 @@
       default: return;
     }
     e.preventDefault();
+  });
+
+  document.addEventListener('keyup', function (e) {
+    if (mode === 'play' && gameFrame.contentWindow) {
+      gameFrame.contentWindow.postMessage(
+        { fresh: 'key', k: e.keyCode || e.which, down: false }, '*');
+    }
+  });
+
+  // bundled games ask to exit via postMessage (Back inside the iframe)
+  window.addEventListener('message', function (ev) {
+    if (ev.data === 'freshhome:exit' && mode === 'play') exitGame();
   });
 
   // Background web apps are suspended on Tizen — resync when we come back.

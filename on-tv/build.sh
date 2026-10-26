@@ -19,7 +19,7 @@ PY
 
 cd launcher
 rm -f ../freshhome-launcher.wgt
-zip -X -q ../freshhome-launcher.wgt config.xml index.html css/style.css js/app.js js/catalog.js
+zip -X -q ../freshhome-launcher.wgt config.xml index.html css/style.css js/app.js js/catalog.js js/input.js games/snake.html games/breakout.html games/g2048.html
 
 cd ../homekey
 rm -f ../freshhome-homekey.wgt

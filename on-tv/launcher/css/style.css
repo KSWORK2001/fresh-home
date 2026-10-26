@@ -314,3 +314,86 @@ footer {
   font-weight: 600;
   letter-spacing: 0.06em;
 }
+
+/* ---- games + play overlay --------------------------------------------------- */
+
+#game-host {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  background: var(--bg);
+}
+
+#game-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.browse-row.status-on .browse-state { color: #7EC98F; }
+.browse-row.status-off .browse-state { color: var(--text-3); }
+
+/* ---- bridge-host keyboard ---------------------------------------------------- */
+
+#hostkb {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: rgba(10, 12, 14, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.kb-panel {
+  width: 1080px;
+  background: #121419;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 44px 52px;
+}
+
+.kb-title {
+  font-size: 22px;
+  letter-spacing: 0.2em;
+  color: var(--text-3);
+  margin-bottom: 14px;
+}
+
+.kb-value {
+  font-size: 40px;
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 34px;
+  min-height: 48px;
+  letter-spacing: 0.04em;
+}
+
+.kb-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.kb-key {
+  width: 74px;
+  height: 64px;
+  background: #1A1D23;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 160ms var(--ease), box-shadow 160ms var(--ease);
+}
+
+.kb-key.wide { width: 120px; font-size: 22px; letter-spacing: 0.08em; }
+
+.kb-key.focused {
+  background: #24272E;
+  box-shadow: 0 0 0 2px var(--ring);
+}

@@ -12,10 +12,13 @@
 """
 
 import argparse
+import base64
 import difflib
+import hashlib
 import json
 import os
 import socket
+import struct
 import sys
 import threading
 import webbrowser
@@ -27,6 +30,110 @@ import samsung
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOCK = threading.Lock()
 PAIRING = {"active": False, "message": ""}
+
+# --- controller bridge relay -------------------------------------------------
+# /bridge      — page on the Mac/phone: reads a gamepad, streams over WS
+# /ws/bridge   — websocket the bridge page connects to (sends input)
+# /ws/feed     — websocket the TV launcher connects to (receives input)
+
+FEED_CLIENTS = set()
+FEED_LOCK = threading.Lock()
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def _ws_read_frame(rfile):
+    """Read one client (masked) frame; returns (opcode, payload bytes) or None."""
+    hdr = rfile.read(2)
+    if len(hdr) < 2:
+        return None
+    b1, b2 = hdr[0], hdr[1]
+    opcode = b1 & 0x0F
+    masked, n = b2 & 0x80, b2 & 0x7F
+    if n == 126:
+        n = struct.unpack(">H", rfile.read(2))[0]
+    elif n == 127:
+        n = struct.unpack(">Q", rfile.read(8))[0]
+    mask = rfile.read(4) if masked else b""
+    data = rfile.read(n) if n else b""
+    if masked and data:
+        data = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+    return opcode, data
+
+
+def _ws_send_text(sock, text):
+    """Send an unmasked server text frame."""
+    payload = text.encode()
+    header = bytearray([0x81])
+    n = len(payload)
+    if n < 126:
+        header.append(n)
+    elif n < 65536:
+        header.append(126)
+        header += struct.pack(">H", n)
+    else:
+        header.append(127)
+        header += struct.pack(">Q", n)
+    sock.sendall(bytes(header) + payload)
+
+
+def _ws_handshake(handler):
+    key = handler.headers.get("Sec-WebSocket-Key", "")
+    accept = base64.b64encode(
+        hashlib.sha1((key + WS_GUID).encode()).digest()).decode()
+    handler.connection.sendall(
+        ("HTTP/1.1 101 Switching Protocols\r\n"
+         "Upgrade: websocket\r\n"
+         "Connection: Upgrade\r\n"
+         "Sec-WebSocket-Accept: " + accept + "\r\n\r\n").encode())
+
+
+def _handle_bridge_ws(handler):
+    """Bridge page connection: read input frames, relay to every feed client."""
+    _ws_handshake(handler)
+    sock = handler.connection
+    try:
+        while True:
+            frame = _ws_read_frame(handler.rfile)
+            if frame is None:
+                break
+            opcode, data = frame
+            if opcode == 0x8:
+                break
+            if opcode == 0x9:  # ping -> pong
+                sock.sendall(bytes([0x8A, 0x00]))
+                continue
+            if opcode != 0x1:
+                continue
+            with FEED_LOCK:
+                targets = list(FEED_CLIENTS)
+            for c in targets:
+                try:
+                    _ws_send_text(c, data.decode("utf-8", "replace"))
+                except OSError:
+                    with FEED_LOCK:
+                        FEED_CLIENTS.discard(c)
+    except OSError:
+        pass
+
+
+def _handle_feed_ws(handler):
+    """TV launcher connection: register, then keep the socket alive."""
+    _ws_handshake(handler)
+    sock = handler.connection
+    with FEED_LOCK:
+        FEED_CLIENTS.add(sock)
+    try:
+        while True:
+            frame = _ws_read_frame(handler.rfile)
+            if frame is None or frame[0] == 0x8:
+                break
+            if frame[0] == 0x9:
+                sock.sendall(bytes([0x8A, 0x00]))
+    except OSError:
+        pass
+    finally:
+        with FEED_LOCK:
+            FEED_CLIENTS.discard(sock)
 
 
 # ------------------------------------------------------------------ cli ----
@@ -131,6 +238,23 @@ def make_handler():
             return json.loads(self.rfile.read(n) or b"{}")
 
         def do_GET(self):
+            # websocket endpoints for the controller bridge (raw socket upgrade)
+            if self.path in ("/ws/bridge", "/ws/feed") and \
+                    "upgrade" in (self.headers.get("Connection") or "").lower():
+                if self.path == "/ws/bridge":
+                    _handle_bridge_ws(self)
+                else:
+                    _handle_feed_ws(self)
+                return
+            if self.path == "/bridge":
+                with open(os.path.join(HERE, "bridge.html"), "rb") as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             try:
                 if self.path in ("/", "/index.html"):
                     with open(os.path.join(HERE, "index.html"), "rb") as f:

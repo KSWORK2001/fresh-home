@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=1920">
+<title>Breakout — Fresh Home</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0A0C0E; overflow: hidden;
+               font-family: "Segoe UI", Roboto, Arial, sans-serif; color: #F4F5F7; }
+  #stage { width: 1920px; height: 1080px; transform-origin: 0 0; position: relative; }
+  canvas { position: absolute; left: 240px; top: 60px; }
+  .title { position: absolute; top: 24px; left: 240px; font-size: 26px;
+           letter-spacing: .22em; color: rgba(244,245,247,.45); }
+  .hud { position: absolute; top: 60px; left: 96px; width: 120px; }
+  .hud .t { font-size: 22px; letter-spacing: .18em; color: rgba(244,245,247,.4); }
+  .hud .v { font-size: 56px; font-weight: 300; margin-bottom: 40px; font-variant-numeric: tabular-nums; }
+  #msg { position: absolute; left: 0; right: 0; top: 460px; text-align: center;
+         font-size: 44px; font-weight: 300; letter-spacing: .1em; display: none; }
+  #msg .k { font-size: 24px; color: rgba(244,245,247,.5); margin-top: 18px; letter-spacing: .14em; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="title">BREAKOUT</div>
+  <div class="hud"><div class="t">SCORE</div><div class="v" id="score">0</div>
+                   <div class="t">LIVES</div><div class="v" id="lives">3</div></div>
+  <canvas id="cv" width="1440" height="960"></canvas>
+  <div id="msg"><span id="msgt"></span><div class="k">PRESS OK / A TO LAUNCH · BACK TO EXIT</div></div>
+</div>
+<script src="../js/input.js"></script>
+<script>
+(function () {
+  'use strict';
+  var stage = document.getElementById('stage');
+  function fit() { stage.style.transform = 'scale(' + (innerWidth / 1920) + ')'; }
+  addEventListener('resize', fit); fit();
+
+  var cv = document.getElementById('cv'), cx = cv.getContext('2d');
+  var W = cv.width, H = cv.height;
+  var PW = 200, PH = 18, BX = 12, BR = 11;
+  var padX, ball, bricks, score, lives, started, over;
+  var ROWS = 6, COLSB = 12, BW = (W - (COLSB + 1) * BX) / COLSB, BH = 34;
+
+  function reset() {
+    score = 0; lives = 3; over = false; started = false;
+    padX = W / 2 - PW / 2;
+    bricks = [];
+    for (var r = 0; r < ROWS; r++) for (var c = 0; c < COLSB; c++)
+      bricks.push({ x: BX + c * (BW + BX), y: 90 + r * (BH + BX), alive: true, row: r });
+    serve();
+    upd(); showMsg('BREAKOUT');
+  }
+  function serve() {
+    ball = { x: padX + PW / 2, y: H - PH - 60,
+             vx: (Math.random() > 0.5 ? 1 : -1) * 6.2, vy: -7.4 };
+    started = false;
+  }
+  function upd() {
+    document.getElementById('score').textContent = score;
+    document.getElementById('lives').textContent = lives;
+  }
+  function showMsg(t) {
+    var m = document.getElementById('msg');
+    document.getElementById('msgt').textContent = t;
+    m.style.display = t ? 'block' : 'none';
+  }
+
+  function update() {
+    var s = FreshInput.state();
+    var pv = (s.right ? 11 : 0) - (s.left ? 11 : 0);
+    padX = Math.max(0, Math.min(W - PW, padX + pv));
+    if (!started) {
+      ball.x = padX + PW / 2; ball.y = H - PH - 60;
+      if (FreshInput.pressed('a')) { started = true; if (over) reset(); showMsg(''); }
+      return;
+    }
+    ball.x += ball.vx; ball.y += ball.vy;
+    if (ball.x < BR) { ball.x = BR; ball.vx *= -1; }
+    if (ball.x > W - BR) { ball.x = W - BR; ball.vx *= -1; }
+    if (ball.y < BR) { ball.y = BR; ball.vy *= -1; }
+    var py = H - 40 - PH;
+    if (ball.y > py - BR && ball.y < py + PH && ball.x > padX - BR && ball.x < padX + PW + BR && ball.vy > 0) {
+      var hit = (ball.x - (padX + PW / 2)) / (PW / 2);
+      ball.vx = hit * 8.4;
+      ball.vy = -Math.max(5.6, Math.abs(ball.vy));
+      ball.y = py - BR;
+    }
+    for (var i = 0; i < bricks.length; i++) {
+      var b = bricks[i];
+      if (!b.alive) continue;
+      if (ball.x > b.x - BR && ball.x < b.x + BW + BR &&
+          ball.y > b.y - BR && ball.y < b.y + BH + BR) {
+        b.alive = false; score += 10; upd();
+        var ox = Math.min(ball.x - (b.x - BR), (b.x + BW + BR) - ball.x);
+        var oy = Math.min(ball.y - (b.y - BR), (b.y + BH + BR) - ball.y);
+        if (ox < oy) ball.vx *= -1; else ball.vy *= -1;
+        if (bricks.every(function (x) { return !x.alive; })) {
+          started = false; over = true; showMsg('CLEARED — ' + score);
+        }
+        break;
+      }
+    }
+    if (ball.y > H + 40) {
+      lives--; upd();
+      if (lives <= 0) { over = true; started = false; showMsg('GAME OVER — ' + score); }
+      else serve();
+    }
+  }
+
+  var shade = ['rgba(244,245,247,0.95)', 'rgba(244,245,247,0.8)',
+               'rgba(244,245,247,0.65)', 'rgba(244,245,247,0.5)',
+               'rgba(244,245,247,0.4)', 'rgba(244,245,247,0.32)'];
+  function draw() {
+    cx.fillStyle = '#0A0C0E'; cx.fillRect(0, 0, W, H);
+    bricks.forEach(function (b) {
+      if (!b.alive) return;
+      cx.fillStyle = shade[b.row];
+      cx.fillRect(b.x, b.y, BW, BH);
+    });
+    cx.fillStyle = '#F4F5F7';
+    cx.fillRect(padX, H - 40 - PH, PW, PH);
+    cx.beginPath(); cx.arc(ball.x, ball.y, BR, 0, Math.PI * 2); cx.fill();
+  }
+
+  var last = 0;
+  function loop(t) {
+    update();
+    draw();
+    FreshInput.endFrame();
+    requestAnimationFrame(loop);
+  }
+  reset();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -9,6 +9,11 @@
   <tizen:privilege name="http://tizen.org/privilege/application.launch"/>
   <tizen:privilege name="http://tizen.org/privilege/application.info"/>
   <tizen:privilege name="http://tizen.org/privilege/tvinputdevice"/>
+  <!-- gamepad input for bundled web games (controller paired to the TV) -->
+  <tizen:metadata key="http://samsung.com/tv/metadata/gamepad" value="extend"/>
+  <!-- controller bridge: connect out to the companion server on the LAN -->
+  <tizen:privilege name="http://tizen.org/privilege/internet"/>
+  <access origin="*" subdomains="true"/>
   <!-- Declaring the main operation + reload="disable" is what lets this app
        answer the Home/power-on launch (required manifest schema: 2.4+). -->
   <tizen:app-control>

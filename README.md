@@ -96,6 +96,28 @@ client for the TV's control protocol on port 8002/8001.
 **Rollback:** `on-tv/restore-home.sh` puts the stock Samsung Home back
 (`com.samsung.tv.csfs`) and can uninstall both widgets.
 
+## Games & controllers
+
+The launcher ships with a **Games** tile (pinned, next to Web Browser) — three
+bundled, offline, zero-tracking games (Snake, Breakout, 2048) that run inside
+the launcher. Input reaches them three ways, all merged into one API:
+
+1. **The remote itself** — d-pad + OK work in every game.
+2. **A controller paired directly to the TV** — pair a Bluetooth gamepad or
+   plug a USB one into the TV; the app declares Samsung's gamepad metadata
+   (`http://samsung.com/tv/metadata/gamepad` = `extend`) so the browser
+   Gamepad API feeds the games. This is the lowest-latency path.
+3. **The Controller Bridge** — for controllers the TV won't accept:
+   run `python3 tv.py serve` on your Mac and open
+   **http://your-mac:8590/bridge** on the Mac (or a phone). That page reads
+   any browser-visible gamepad (plus WASD/arrows as a keyboard fallback) and
+   streams it over a WebSocket to the Games screen on the TV. Set the bridge
+   host on the TV once: Games → Bridge Host (d-pad keyboard, no typing on a
+   phone needed).
+
+The bridge relay is built into `tv.py serve` (`/ws/bridge` in, `/ws/feed`
+out) — a hand-rolled WebSocket server, still zero dependencies.
+
 ## Design
 
 The launcher UI is deliberately typographic: no icon assets, no gradients,
@@ -149,9 +171,12 @@ much of it undocumented elsewhere:
 ## Repo layout
 
     discover.py, samsung.py, tv.py, index.html   LAN launcher (stdlib-only)
+    bridge.html                                   controller bridge page (/bridge)
     apps.json                                     core app catalog (shared)
     apps-extra.json                               extended catalog (Get Apps)
     on-tv/launcher/                               the .wgt launcher source
+    on-tv/launcher/games/                         bundled web games (offline)
+    on-tv/launcher/js/input.js                    unified input (keys/gamepad/bridge)
     on-tv/homekey/                                the Home-key wrapper .wgt
     on-tv/tools/sign.js                           wgt signer (Samsung-compatible)
     on-tv/tools/make_samsung_cert.py              Samsung-account certificate mint

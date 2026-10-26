@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=1920">
+<title>Snake — Fresh Home</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0A0C0E; overflow: hidden;
+               font-family: "Segoe UI", Roboto, Arial, sans-serif; color: #F4F5F7; }
+  #stage { width: 1920px; height: 1080px; transform-origin: 0 0; position: relative; }
+  canvas { position: absolute; left: 240px; top: 90px; }
+  .hud { position: absolute; top: 90px; left: 96px; width: 120px; }
+  .hud .t { font-size: 22px; letter-spacing: .18em; color: rgba(244,245,247,.4); }
+  .hud .v { font-size: 56px; font-weight: 300; margin-bottom: 40px; font-variant-numeric: tabular-nums; }
+  .title { position: absolute; top: 40px; left: 240px; font-size: 26px;
+           letter-spacing: .22em; color: rgba(244,245,247,.45); }
+  #msg { position: absolute; left: 0; right: 0; top: 460px; text-align: center;
+         font-size: 44px; font-weight: 300; letter-spacing: .1em; display: none; }
+  #msg .k { font-size: 24px; color: rgba(244,245,247,.5); margin-top: 18px; letter-spacing: .14em; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="title">SNAKE</div>
+  <div class="hud"><div class="t">SCORE</div><div class="v" id="score">0</div>
+                   <div class="t">BEST</div><div class="v" id="best">0</div></div>
+  <canvas id="cv" width="1440" height="900"></canvas>
+  <div id="msg"><span id="msgt"></span><div class="k">PRESS OK / A TO START · BACK TO EXIT</div></div>
+</div>
+<script src="../js/input.js"></script>
+<script>
+(function () {
+  'use strict';
+  var stage = document.getElementById('stage');
+  function fit() { stage.style.transform = 'scale(' + (innerWidth / 1920) + ')'; }
+  addEventListener('resize', fit); fit();
+
+  var cv = document.getElementById('cv'), cx = cv.getContext('2d');
+  var CELL = 30, COLS = 48, ROWS = 30;
+  var snake, dir, nextDir, food, score, best = +(localStorage.getItem('freshhome.snake.best') || 0), dead, started, tickMs;
+  document.getElementById('best').textContent = best;
+
+  function reset() {
+    snake = [{ x: 24, y: 15 }, { x: 23, y: 15 }, { x: 22, y: 15 }];
+    dir = { x: 1, y: 0 }; nextDir = dir;
+    food = drop(); score = 0; dead = false; started = false; tickMs = 130;
+    document.getElementById('score').textContent = '0';
+    draw();
+  }
+  function drop() {
+    var p;
+    do { p = { x: (Math.random() * COLS) | 0, y: (Math.random() * ROWS) | 0 }; }
+    while (snake && snake.some(function (s) { return s.x === p.x && s.y === p.y; }));
+    return p;
+  }
+  function showMsg(t) {
+    var m = document.getElementById('msg');
+    document.getElementById('msgt').textContent = t;
+    m.style.display = t ? 'block' : 'none';
+  }
+  function step() {
+    var s = FreshInput.state();
+    if (s.left && dir.x === 0) nextDir = { x: -1, y: 0 };
+    if (s.right && dir.x === 0) nextDir = { x: 1, y: 0 };
+    if (s.up && dir.y === 0) nextDir = { x: 0, y: -1 };
+    if (s.down && dir.y === 0) nextDir = { x: 0, y: 1 };
+    dir = nextDir;
+    var head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+    if (head.x < 0 || head.y < 0 || head.x >= COLS || head.y >= ROWS ||
+        snake.some(function (p) { return p.x === head.x && p.y === head.y; })) {
+      dead = true; started = false;
+      if (score > best) { best = score; localStorage.setItem('freshhome.snake.best', best);
+                          document.getElementById('best').textContent = best; }
+      showMsg('GAME OVER — ' + score);
+      return;
+    }
+    snake.unshift(head);
+    if (head.x === food.x && head.y === food.y) {
+      score += 10; document.getElementById('score').textContent = score;
+      food = drop();
+      if (tickMs > 70) tickMs -= 2;
+    } else snake.pop();
+    draw();
+  }
+  function draw() {
+    cx.fillStyle = '#0A0C0E'; cx.fillRect(0, 0, cv.width, cv.height);
+    cx.strokeStyle = 'rgba(255,255,255,0.05)'; cx.lineWidth = 1;
+    cx.strokeRect(0.5, 0.5, cv.width - 1, cv.height - 1);
+    cx.fillStyle = '#F4F5F7';
+    cx.fillRect(food.x * CELL + 6, food.y * CELL + 6, CELL - 12, CELL - 12);
+    snake.forEach(function (p, i) {
+      var fade = i === 0 ? 1 : Math.max(0.35, 1 - i / snake.length);
+      cx.fillStyle = 'rgba(244,245,247,' + fade + ')';
+      var pad = i === 0 ? 3 : 6;
+      cx.fillRect(p.x * CELL + pad, p.y * CELL + pad, CELL - pad * 2, CELL - pad * 2);
+    });
+  }
+  var acc = 0, last = 0;
+  function loop(t) {
+    var dt = t - last; last = t;
+    var s = FreshInput.state();
+    if (!started && !dead && FreshInput.pressed('a')) { started = true; showMsg(''); }
+    if (!started && dead && FreshInput.pressed('a')) reset();
+    if (started) { acc += dt; while (acc >= tickMs) { acc -= tickMs; step(); if (!started) break; } }
+    FreshInput.endFrame();
+    requestAnimationFrame(loop);
+  }
+  reset();
+  showMsg('SNAKE');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
