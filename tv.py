@@ -197,6 +197,14 @@ def cmd_power(args):
     return 0
 
 
+def cmd_browse(args):
+    tv, _ = samsung.get_tv()
+    url = args.url if "://" in args.url else "https://" + args.url
+    print(f"Opening {url} on the TV…")
+    tv.open_browser(url)
+    return 0
+
+
 def cmd_wake(args):
     cfg = samsung.load_config()
     if not cfg.get("mac"):
@@ -245,6 +253,15 @@ def make_handler():
                     _handle_bridge_ws(self)
                 else:
                     _handle_feed_ws(self)
+                return
+            if self.path == "/remote":
+                with open(os.path.join(HERE, "remote.html"), "rb") as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
                 return
             if self.path == "/bridge":
                 with open(os.path.join(HERE, "bridge.html"), "rb") as f:
@@ -308,6 +325,12 @@ def make_handler():
                     cfg = samsung.load_config()
                     ok = samsung.wol(cfg.get("mac", ""))
                     self._json({"ok": ok})
+                elif self.path == "/api/browse":
+                    body = self._body()
+                    tv, _ = _tv_from_config()
+                    with LOCK:
+                        tv.open_browser(body.get("url", ""))
+                    self._json({"ok": True})
                 elif self.path == "/api/pair":
                     if PAIRING["active"]:
                         self._json({"ok": True, "started": False})
@@ -412,6 +435,9 @@ def main():
     sp = sub.add_parser("key")
     sp.add_argument("key")
     sp.set_defaults(fn=cmd_key)
+    sp = sub.add_parser("browse")
+    sp.add_argument("url", help="open this URL in the TV's browser")
+    sp.set_defaults(fn=cmd_browse)
     sub.add_parser("power").set_defaults(fn=cmd_power)
     sub.add_parser("wake").set_defaults(fn=cmd_wake)
     sp = sub.add_parser("serve")

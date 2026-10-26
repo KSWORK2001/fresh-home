@@ -118,6 +118,29 @@ the launcher. Input reaches them three ways, all merged into one API:
 The bridge relay is built into `tv.py serve` (`/ws/bridge` in, `/ws/feed`
 out) — a hand-rolled WebSocket server, still zero dependencies.
 
+## Cloud gaming & web clients
+
+The Games screen also has a **Cloud & Streaming** section: Xbox Cloud
+Gaming, GeForce NOW, Amazon Luna, PS Remote Play, and Steam Link. These open
+in the **TV's stock browser** — the only context on the TV with DRM video
+and native gamepad support — so pair the controller **directly to the TV**
+for cloud gaming (the Mac bridge cannot inject input into another app).
+
+**Open URL…** lets you point the TV browser at any web game client,
+including self-hosted open-source remote-play projects (the new wave of
+browser game-streaming clients like the web-based PS Remote Play tools).
+On the LAN side, `python3 tv.py browse <url>` (or `POST /api/browse`) opens
+a URL on the TV from your Mac.
+
+## Phone remote (Android/iOS)
+
+With `python3 tv.py serve` running, open **http://your-mac:8590/remote**
+on any phone on the Wi-Fi: swipe-to-navigate touchpad, tap for OK, hard
+buttons for BACK/HOME/VOL±/MUTE/POWER/WAKE, one-tap app launch chips, and
+cloud-gaming chips that open the services on the TV. Add it to the home
+screen for an app-like full-screen remote. (Android gives haptics on every
+key press.)
+
 ## Design
 
 The launcher UI is deliberately typographic: no icon assets, no gradients,

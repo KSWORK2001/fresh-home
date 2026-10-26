@@ -322,6 +322,22 @@ class SamsungTV:
     def power(self):
         return self.key("KEY_POWER")
 
+    def open_browser(self, url):
+        """Open a URL in the TV's stock browser (cloud gaming, web apps)."""
+        ws = self._channel()
+        try:
+            ws.send(json.dumps({
+                "method": "ms.remote.control",
+                "params": {"Cmd": "OpenBrowser", "DataOfCmd": url, "Type": "deepview"},
+            }))
+            try:
+                ws.recv(2.0)
+            except (TimeoutError, TVError):
+                pass
+            return True
+        finally:
+            ws.close()
+
 
 def wol(mac):
     """Broadcast Wake-on-LAN packets for the TV's MAC."""

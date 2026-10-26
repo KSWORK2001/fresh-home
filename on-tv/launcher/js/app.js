@@ -33,9 +33,25 @@
     { name: 'Breakout', url: 'games/breakout.html' },
     { name: '2048', url: 'games/g2048.html' },
   ];
+  /* Cloud & streaming open in the TV's stock browser — the only context with
+     DRM video and native gamepad support (pair the controller to the TV).
+     "Open URL…" covers self-hosted web clients (AnyPS5-style remote play). */
+  var CLOUD = [
+    { name: 'Xbox Cloud Gaming', url: 'https://www.xbox.com/play' },
+    { name: 'GeForce NOW', url: 'https://play.geforcenow.com' },
+    { name: 'Amazon Luna', url: 'https://luna.amazon.com' },
+    { name: 'PS Remote Play', url: 'https://remoteplay.dl.playstation.net/' },
+    { name: 'Steam Link', appId: '3201702011851', alt: ['3201702011851'] },
+  ];
   var BRIDGE_PORT = 8590;
   var KB_ROWS = [
     ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '.'],
+    ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+    ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
+    ['z', 'x', 'c', 'v', 'b', 'n', 'm', 'DEL', 'OK']
+  ];
+  var KB_ROWS_URL = [
+    ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '.', '/', ':', '-'],
     ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
     ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
     ['z', 'x', 'c', 'v', 'b', 'n', 'm', 'DEL', 'OK']
@@ -400,6 +416,23 @@
           '', function () { playGame(g.url); });
     });
 
+    row('<span class="browse-dot" style="background:#B4B8C0"></span>' +
+        '<span class="browse-name">Open URL…</span>' +
+        '<span class="browse-id">any web client · e.g. a self-hosted AnyPS5</span>' +
+        '<span class="browse-state">OPEN</span>',
+        '', function () { openKb('url', 'https://', function (v) { openUrl(v); }); });
+
+    CLOUD.forEach(function (c) {
+      row('<span class="browse-dot" style="background:#4C9EF8"></span>' +
+          '<span class="browse-name">' + c.name + '</span>' +
+          '<span class="browse-id">' + (c.appId ? 'TV app' : escapeHtml(c.url.replace('https://', ''))) + '</span>' +
+          '<span class="browse-state">OPEN</span>',
+          '', function () {
+            if (c.appId) { launchApp({ name: c.name, appId: c.appId, alt: c.alt || [] }); }
+            else { openUrl(c.url); }
+          });
+    });
+
     row('<span class="browse-dot" style="background:#9BB0C4"></span>' +
         '<span class="browse-name">Controller Bridge</span>' +
         '<span class="browse-id">open http://' + bridge.host + ':' + BRIDGE_PORT + '/bridge on your Mac</span>' +
@@ -495,15 +528,36 @@
     }
   }
 
+  function openUrl(url) {
+    if (typeof tizen === 'undefined' || !tizen.application) {
+      toast('Preview — would open ' + url.replace('https://', ''));
+      return;
+    }
+    try {
+      var ac = new tizen.ApplicationControl(
+        'http://tizen.org/appcontrol/operation/view', url);
+      tizen.application.launchAppControl(ac, 'org.tizen.browser',
+        null, function () { toast('Could not open the browser'); },
+        function () { toast('Browser failed'); });
+    } catch (e) {
+      toast('Browser failed');
+    }
+  }
+
   // ---- bridge-host keyboard ---------------------------------------------------
 
-  function openHostKb() {
+  var kbKind = 'host', kbOnSave = null;
+  var KB_LAYOUTS = { host: KB_ROWS, url: KB_ROWS_URL };
+
+  function openKb(kind, initial, onSave) {
     mode = 'hostkb';
-    kbBuf = bridge.host;
+    kbKind = kind;
+    kbOnSave = onSave || null;
+    kbBuf = initial || '';
     kbRow = 0; kbCol = 0;
     kbRowsEl.innerHTML = '';
     kbKeys = [];
-    KB_ROWS.forEach(function (keys, r) {
+    KB_LAYOUTS[kind].forEach(function (keys, r) {
       var rowEl = document.createElement('div');
       rowEl.className = 'kb-row';
       var rowKeys = [];
@@ -519,16 +573,30 @@
       kbRowsEl.appendChild(rowEl);
       kbKeys.push(rowKeys);
     });
+    document.querySelector('.kb-title').textContent =
+      kind === 'url' ? 'OPEN URL' : 'BRIDGE HOST';
     kbValue.textContent = kbBuf;
     hostKb.hidden = false;
     applyKbFocus();
   }
 
+  function openHostKb() {
+    openKb('host', bridge.host, function (v) {
+      bridge.host = v;
+      try { localStorage.setItem('freshhome.bridge_host', v); } catch (e) {}
+      connectBridge();
+    });
+  }
+
   function closeHostKb(save) {
     if (save && kbBuf) {
-      bridge.host = kbBuf;
-      try { localStorage.setItem('freshhome.bridge_host', kbBuf); } catch (e) {}
-      connectBridge();
+      if (kbKind === 'host') {
+        bridge.host = kbBuf;
+        try { localStorage.setItem('freshhome.bridge_host', kbBuf); } catch (e) {}
+        connectBridge();
+      } else if (kbOnSave) {
+        kbOnSave(kbBuf);
+      }
     }
     hostKb.hidden = true;
     mode = 'games';
@@ -545,14 +613,14 @@
   function kbPress(k) {
     if (k === 'DEL') kbBuf = kbBuf.slice(0, -1);
     else if (k === 'OK') { closeHostKb(true); return; }
-    else if (kbBuf.length < 30) kbBuf += k;
+    else if (kbBuf.length < 120) kbBuf += k;
     applyKbFocus();
   }
 
   function kbMove(dr, dc) {
-    kbCol = Math.max(0, Math.min(KB_ROWS[kbRow].length - 1, kbCol + dc));
-    kbRow = Math.max(0, Math.min(KB_ROWS.length - 1, kbRow + dr));
-    if (kbCol >= KB_ROWS[kbRow].length) kbCol = KB_ROWS[kbRow].length - 1;
+    kbCol = Math.max(0, Math.min(KB_LAYOUTS[kbKind][kbRow].length - 1, kbCol + dc));
+    kbRow = Math.max(0, Math.min(KB_LAYOUTS[kbKind].length - 1, kbRow + dr));
+    if (kbCol >= KB_LAYOUTS[kbKind][kbRow].length) kbCol = KB_LAYOUTS[kbKind][kbRow].length - 1;
     applyKbFocus();
   }
 
@@ -655,7 +723,7 @@
         case 38: kbMove(-1, 0); break;
         case 39: kbMove(0, 1); break;
         case 40: kbMove(1, 0); break;
-        case 13: case 32: kbPress(KB_ROWS[kbRow][kbCol]); break;
+        case 13: case 32: kbPress(KB_LAYOUTS[kbKind][kbRow][kbCol]); break;
         case 8: kbPress('DEL'); break;
         case 27: case 461: case 10009: closeHostKb(false); break;
         default: return;
